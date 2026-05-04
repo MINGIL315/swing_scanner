@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import typer
+from loguru import logger
 from rich.console import Console
 
 app = typer.Typer(
@@ -367,6 +368,7 @@ def scan(
 
     fetch → scan_universe → DB 저장 → 결과 요약 출력.
     """
+    import concurrent.futures as cf
     import time
     from datetime import date, timedelta
 
@@ -393,7 +395,7 @@ def scan(
         _load_market_map,
         _maybe_update_universe,
     )
-    from scanner.scanner import scan_universe
+    from scanner.scanner import analyze_ticker
 
     setup_logger()
     init_database()
@@ -408,11 +410,13 @@ def scan(
         title="[bold cyan]Swing Scanner — 스캔 시작[/bold cyan]",
         border_style="cyan",
     ))
+    logger.info("scan 명령어 시작 | market={} skip_fetch={} min_confidence={}", market_upper, skip_fetch, min_confidence)
 
     t_start = time.monotonic()
 
+    # ── Phase 1: 유니버스 확인 + 데이터 fetch ─────────────────────────
+    logger.info("Phase 1 진입: 유니버스 확인 + 데이터 fetch")
     try:
-        # ── Phase 1: 유니버스 확인 + 데이터 fetch ─────────────────────
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -431,98 +435,137 @@ def scan(
                 start_date = end_date - timedelta(days=365)
                 run_data_pipeline(market=market_upper, start=start_date, end=end_date)
                 progress.update(task1, description="[green]✓ 데이터 fetch 완료[/green]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]fetch 단계에서 중단. 저장할 결과가 없습니다.[/yellow]")
+        logger.warning("사용자 중단 — fetch 단계")
+        raise typer.Exit(code=0)
 
-        console.print("[dim]✓ Phase 1: 유니버스 + 데이터 fetch[/dim]")
+    console.print("[dim]✓ Phase 1: 유니버스 + 데이터 fetch[/dim]")
+    logger.info("Phase 1 완료")
 
-        # ── Phase 2: 패턴 스캔 ────────────────────────────────────────
-        tickers = get_active_tickers(market_upper)
-        if not tickers:
-            console.print("[yellow]활성 종목이 없습니다. 유니버스 갱신 필요.[/yellow]")
-            raise typer.Exit(code=0)
+    # ── Phase 2: 데이터 로드 ─────────────────────────────────────────
+    logger.info("Phase 2 진입: 일봉 데이터 로드")
+    tickers = get_active_tickers(market_upper)
+    if not tickers:
+        console.print("[yellow]활성 종목이 없습니다. 유니버스 갱신 필요.[/yellow]")
+        logger.warning("활성 종목 없음 — 조기 종료")
+        raise typer.Exit(code=0)
 
-        daily_dfs = _load_daily_dfs(tickers)
-        market_map = _load_market_map(tickers)
+    daily_dfs = _load_daily_dfs(tickers)
+    market_map = _load_market_map(tickers)
+    fundamentals_map = _load_fundamentals(tickers) if with_fundamental_filter else None
+    logger.info("데이터 로드 완료: {}개 종목", len(daily_dfs))
 
-        fundamentals_map = None
-        if with_fundamental_filter:
-            fundamentals_map = _load_fundamentals(tickers)
+    # ── Phase 3: 패턴 탐지 (Ctrl+C 시 완료분 부분 저장) ─────────────
+    logger.info("Phase 3 진입: 패턴 탐지 ({}종목, workers={})", len(daily_dfs), FETCH_MAX_WORKERS)
+    results: list = []
+    interrupted = False
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            console=console,
-            transient=True,
-        ) as progress:
-            task2 = progress.add_task(
-                f"[bold]패턴 탐지 중...[/bold]  ({len(daily_dfs)}종목)",
-                total=len(daily_dfs),
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task2 = progress.add_task(
+            "[bold]패턴 탐지 중...[/bold]",
+            total=len(daily_dfs),
+        )
+        try:
+            with cf.ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+                future_map = {
+                    executor.submit(
+                        analyze_ticker,
+                        t,
+                        market_map.get(t, "US"),
+                        daily_dfs[t],
+                        fundamentals_map.get(t) if fundamentals_map else None,
+                    ): t
+                    for t in daily_dfs
+                }
+                for future in cf.as_completed(future_map):
+                    t = future_map[future]
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        logger.error("{} 처리 실패: {}", t, exc)
+                    finally:
+                        progress.advance(task2)
+        except KeyboardInterrupt:
+            interrupted = True
+            console.print(
+                f"\n[yellow]Ctrl+C 감지 — 완료된 {len(results)}건 저장 후 종료[/yellow]"
             )
-            results = scan_universe(
-                daily_dfs=daily_dfs,
-                market_map=market_map,
-                fundamentals_map=fundamentals_map,
-                max_workers=FETCH_MAX_WORKERS,
-            )
-            progress.update(task2, completed=len(daily_dfs))
+            logger.warning("사용자 중단: {}개 종목 완료, 부분 저장 시작", len(results))
 
-        console.print(f"[dim]✓ Phase 2: 패턴 탐지 ({len(daily_dfs)}종목)[/dim]")
+    phase_label = f"(부분: {len(results)}/{len(daily_dfs)})" if interrupted else f"({len(daily_dfs)}종목)"
+    console.print(f"[dim]✓ Phase 3: 패턴 탐지 {phase_label}[/dim]")
+    logger.info("Phase 3 완료: {}개 결과", len(results))
 
-        # ── 후처리 ────────────────────────────────────────────────────
-        if no_volume_filter:
-            for r in results:
-                r.passed_volume = True
+    # ── 후처리 ───────────────────────────────────────────────────────
+    if no_volume_filter:
+        for r in results:
+            r.passed_volume = True
 
-        if patterns:
-            for r in results:
-                pairs = [
-                    (pr, sc)
-                    for pr, sc in zip(r.pattern_results, r.confidence_scores)
-                    if pr.pattern_name in patterns
-                ]
-                if pairs:
-                    r.pattern_results, r.confidence_scores = map(list, zip(*pairs))
-                else:
-                    r.pattern_results = []
-                    r.confidence_scores = []
+    if patterns:
+        for r in results:
+            pairs = [
+                (pr, sc)
+                for pr, sc in zip(r.pattern_results, r.confidence_scores)
+                if pr.pattern_name in patterns
+            ]
+            if pairs:
+                r.pattern_results, r.confidence_scores = map(list, zip(*pairs))
+            else:
+                r.pattern_results = []
+                r.confidence_scores = []
 
-        # ── DB 저장 ────────────────────────────────────────────────────
+    # ── Phase 4: DB 저장 ─────────────────────────────────────────────
+    logger.info("Phase 4 진입: DB 저장")
+    try:
         with get_session() as session:
             saved_count = save_scan_results(results, session)
-        console.print(f"[dim]✓ Phase 3: DB 저장 ({saved_count}건)[/dim]")
+    except Exception as exc:
+        logger.error("DB 저장 실패: {}", exc)
+        console.print(f"[red]DB 저장 실패: {exc}[/red]")
+        raise typer.Exit(code=1)
 
-        # ── 상위 결과 조회 ─────────────────────────────────────────────
-        scan_date = date.today()
-        min_score_arg = min_confidence if min_confidence > 0 else None
-        with get_session() as session:
-            top_results = get_scan_results(
-                scan_date=scan_date,
-                session=session,
-                min_score=min_score_arg,
-            )
+    console.print(f"[dim]✓ Phase 4: DB 저장 ({saved_count}건)[/dim]")
+    logger.info("Phase 4 완료: {}건 저장", saved_count)
 
-        pattern_dist: dict[str, int] = {}
-        for r in results:
-            for pr in r.pattern_results:
-                pattern_dist[pr.pattern_name] = pattern_dist.get(pr.pattern_name, 0) + 1
+    # ── 상위 결과 조회 ────────────────────────────────────────────────
+    scan_date = date.today()
+    min_score_arg = min_confidence if min_confidence > 0 else None
+    with get_session() as session:
+        top_results = get_scan_results(
+            scan_date=scan_date,
+            session=session,
+            min_score=min_score_arg,
+        )
 
-    except KeyboardInterrupt:
-        console.print("\n[yellow]사용자 중단 요청. 종료합니다.[/yellow]")
-        raise typer.Exit(code=0)
+    pattern_dist: dict[str, int] = {}
+    for r in results:
+        for pr in r.pattern_results:
+            pattern_dist[pr.pattern_name] = pattern_dist.get(pr.pattern_name, 0) + 1
 
     duration = time.monotonic() - t_start
     total_patterns = sum(len(r.pattern_results) for r in results)
+    logger.info("scan 완료 | 패턴={}건 저장={}건 소요={:.1f}초", total_patterns, saved_count, duration)
 
     # ── 요약 패널 ─────────────────────────────────────────────────────
+    panel_title = "[bold yellow]⚠ 스캔 완료 (부분)[/bold yellow]" if interrupted else "[bold green]스캔 완료[/bold green]"
+    panel_border = "yellow" if interrupted else "green"
+
     summary_grid = Table.grid(padding=(0, 2))
     summary_grid.add_column(style="bold cyan", min_width=16)
     summary_grid.add_column(justify="right", style="bold")
     summary_grid.add_row("스캔 기준일", str(scan_date))
     summary_grid.add_row("스캔 시장", market_upper)
-    summary_grid.add_row("스캔 종목 수", str(len(tickers)))
+    summary_grid.add_row("스캔 종목 수", f"{len(results)}/{len(daily_dfs)}" if interrupted else str(len(daily_dfs)))
     summary_grid.add_row("탐지 패턴 수", str(total_patterns))
     summary_grid.add_row("DB 저장 건수", str(saved_count))
     summary_grid.add_row("소요 시간", f"{duration:.1f}초")
@@ -533,14 +576,13 @@ def scan(
             display, color = PATTERN_STYLES.get(pname, (pname, "white"))
             summary_grid.add_row(f"[{color}]{display}[/{color}]", str(cnt))
 
-    console.print(Panel(
-        summary_grid,
-        title="[bold green]스캔 완료[/bold green]",
-        border_style="green",
-    ))
+    console.print(Panel(summary_grid, title=panel_title, border_style=panel_border))
 
     if top_results:
         _print_results_table(top_results[:10], title="TOP 10 — 신뢰도 순위", top_n=10)
+
+    if interrupted:
+        raise typer.Exit(code=0)
 
 
 # ---------------------------------------------------------------------------
