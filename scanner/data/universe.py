@@ -122,7 +122,15 @@ def update_kospi200() -> int:
     logger.info("KOSPI200 구성종목 조회 시작 (기준일: {})", today)
 
     # pykrx: 날짜 기준 KOSPI200 종목 코드 목록
-    tickers: list[str] = krx_stock.get_index_portfolio_deposit_file("1028", today)
+    # 오류 시 빈 DataFrame이 반환될 수 있으므로 타입을 먼저 확인한다.
+    _raw = krx_stock.get_index_portfolio_deposit_file("1028", today)
+    if isinstance(_raw, pd.DataFrame):
+        tickers: list[str] = [] if _raw.empty else _raw.iloc[:, 0].astype(str).tolist()
+    elif isinstance(_raw, list):
+        tickers = _raw
+    else:
+        tickers = list(_raw) if _raw else []
+
     if not tickers:
         logger.warning("KOSPI200 종목 목록이 비어있습니다 (휴장일 가능성).")
         return 0
