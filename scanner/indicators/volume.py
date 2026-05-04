@@ -14,7 +14,8 @@ def volume_ratio(volume: pd.Series, period: int = 20) -> pd.Series:
     Returns:
         비율 시리즈. 평균이 0이거나 NaN이면 NaN.
     """
-    avg = volume.rolling(window=period, min_periods=period).mean()
+    # 현재 봉을 평균에서 제외 (오늘 거래량을 직전 period일 평균과 비교)
+    avg = volume.shift(1).rolling(window=period, min_periods=period).mean()
     return volume / avg.replace(0, float("nan"))
 
 
@@ -28,7 +29,7 @@ def value_ratio(value: pd.Series, period: int = 20) -> pd.Series:
     Returns:
         비율 시리즈.
     """
-    avg = value.rolling(window=period, min_periods=period).mean()
+    avg = value.shift(1).rolling(window=period, min_periods=period).mean()
     return value / avg.replace(0, float("nan"))
 
 

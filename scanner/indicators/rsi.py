@@ -25,8 +25,10 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     avg_gain = gain.ewm(com=period - 1, adjust=False, min_periods=period).mean()
     avg_loss = loss.ewm(com=period - 1, adjust=False, min_periods=period).mean()
 
-    rs = avg_gain / avg_loss.replace(0, float("nan"))
-    return 100 - (100 / (1 + rs))
+    # avg_loss=0 이면 RS=∞, RSI=100 (전량 상승일)
+    rs = avg_gain / avg_loss.where(avg_loss != 0, float("nan"))
+    result = 100 - (100 / (1 + rs))
+    return result.where(avg_loss != 0, 100.0)
 
 
 def is_oversold(rsi_value: float, threshold: float = 30.0) -> bool:
