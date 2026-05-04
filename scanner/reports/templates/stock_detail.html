@@ -33,7 +33,10 @@
     border-radius: 8px;
     margin-top: 16px;
     overflow: hidden;
+    /* 차트 영역 위에서는 흰색 십자선 커서를 강제 (dark UI 가독성) */
+    cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='19' height='19' viewBox='0 0 19 19'><line x1='9.5' y1='0' x2='9.5' y2='19' stroke='white' stroke-width='1'/><line x1='0' y1='9.5' x2='19' y2='9.5' stroke='white' stroke-width='1'/></svg>") 9 9, crosshair;
   }
+  .chart-panel canvas, .chart-panel * { cursor: inherit; }
 
   /* 커스텀 크로스헤어 시간축 레이블 (LWC 내장 레이블은 숨김) */
   .crosshair-date-tag {
@@ -384,6 +387,7 @@
       chartCandle.addLineSeries({
         color, lineWidth: width,
         priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false,   /* 마우스 hover 시 점 미표시 */
       }).setData(toTs(alignToCandles(OHLCV[key])));
     }
   });
@@ -431,6 +435,7 @@
     rsiSeries = chartRsi.addLineSeries({
       color: '#00bcd4', lineWidth: 1.5,
       priceLineVisible: false, lastValueVisible: true,
+      crosshairMarkerVisible: false,   /* 마우스 hover 시 점 미표시 */
       autoscaleInfoProvider: () => ({
         priceRange: { minValue: 0, maxValue: 100 },
         margins: { above: 0, below: 0 },
