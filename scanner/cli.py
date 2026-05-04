@@ -246,5 +246,344 @@ def test_pattern(
         console.print("\n[bold yellow]탐지된 패턴 없음[/bold yellow]")
 
 
+# ---------------------------------------------------------------------------
+# 패턴 표시 상수 (색상 + 한국어 이름)
+# ---------------------------------------------------------------------------
+
+PATTERN_STYLES: dict[str, tuple[str, str]] = {
+    "double_bottom": ("쌍바닥", "cyan"),
+    "golden_cross": ("골든크로스", "yellow"),
+    "box_breakout": ("박스 돌파", "magenta"),
+    "pullback": ("눌림목", "green"),
+}
+
+
+# ---------------------------------------------------------------------------
+# 내부 헬퍼
+# ---------------------------------------------------------------------------
+
+def _parse_date(date_str: str | None) -> "date":
+    """날짜 문자열을 date 객체로 변환한다.
+
+    Args:
+        date_str: "YYYY-MM-DD" 또는 "today" 또는 None (→ 오늘).
+
+    Returns:
+        date 객체.
+    """
+    from datetime import date as _date
+
+    if date_str is None or date_str.lower() == "today":
+        return _date.today()
+    try:
+        return _date.fromisoformat(date_str)
+    except ValueError:
+        console.print(f"[red]날짜 형식 오류: {date_str}  (YYYY-MM-DD 또는 today 사용)[/red]")
+        raise typer.Exit(code=1)
+
+
+def _pattern_markup(pattern_name: str) -> str:
+    """패턴명을 색상 markup 문자열로 변환한다."""
+    display, color = PATTERN_STYLES.get(pattern_name, (pattern_name, "white"))
+    return f"[{color}]{display}[/{color}]"
+
+
+def _print_results_table(rows: list, title: str, top_n: int = 20) -> None:
+    """ScanResult ORM 목록을 Rich 테이블로 출력한다.
+
+    Args:
+        rows  : ScanResult ORM 인스턴스 목록 (confidence_score 내림차순 가정).
+        title : 테이블 제목.
+        top_n : 출력할 최대 행 수.
+    """
+    from rich.table import Table
+
+    tbl = Table(title=title, show_lines=False, header_style="bold")
+    tbl.add_column("#", style="dim", width=4, justify="right")
+    tbl.add_column("종목", min_width=10)
+    tbl.add_column("패턴", min_width=12)
+    tbl.add_column("점수", justify="right", min_width=6)
+    tbl.add_column("진입가", justify="right", min_width=10)
+    tbl.add_column("손절가", justify="right", min_width=10)
+    tbl.add_column("목표가", justify="right", min_width=10)
+    tbl.add_column("R:R", justify="right", min_width=5)
+    tbl.add_column("주봉", min_width=8)
+    tbl.add_column("필터", justify="center", min_width=4)
+
+    for i, row in enumerate(rows[:top_n], 1):
+        pname = row.pattern_name
+        display, color = PATTERN_STYLES.get(pname, (pname, "white"))
+        score = row.confidence_score
+        if score >= 80:
+            score_str = f"[bold green]{score:.1f}[/bold green]"
+        elif score >= 70:
+            score_str = f"[bold yellow]{score:.1f}[/bold yellow]"
+        else:
+            score_str = f"{score:.1f}"
+
+        tbl.add_row(
+            str(i),
+            row.ticker,
+            f"[{color}]{display}[/{color}]",
+            score_str,
+            f"{row.entry_price:,.2f}" if row.entry_price else "-",
+            f"{row.stop_loss:,.2f}" if row.stop_loss else "-",
+            f"{row.target_price:,.2f}" if row.target_price else "-",
+            f"1:{row.risk_reward_ratio:.1f}" if row.risk_reward_ratio else "-",
+            row.trend_weekly or "-",
+            "[green]✓[/green]" if row.passed_filters else "[red]✗[/red]",
+        )
+
+    console.print(tbl)
+
+
+# ---------------------------------------------------------------------------
+# scan 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("scan")
+def scan(
+    market: str = typer.Option(
+        "all", "--market", "-m", help="스캔 시장: kr | us | all",
+    ),
+    pattern: Optional[str] = typer.Option(
+        None, "--pattern", "-p",
+        help="패턴 필터 (쉼표 구분, 예: pullback,box_breakout)",
+    ),
+    min_confidence: float = typer.Option(
+        70.0, "--min-confidence", help="최소 신뢰도 점수 (0~100)",
+    ),
+    no_volume_filter: bool = typer.Option(
+        False, "--no-volume-filter", help="거래량 필터 비활성화",
+    ),
+    with_fundamental_filter: bool = typer.Option(
+        False, "--with-fundamental-filter", help="재무 필터 활성화",
+    ),
+    skip_fetch: bool = typer.Option(
+        False, "--skip-fetch", help="데이터 fetch 생략 (DB 기존 데이터로 스캔)",
+    ),
+) -> None:
+    """전체 파이프라인을 실행한다.
+
+    fetch → scan_universe → DB 저장 → 결과 요약 출력.
+    """
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.pipeline import run_daily_pipeline
+
+    setup_logger()
+    init_database()
+
+    patterns = [p.strip() for p in pattern.split(",")] if pattern else None
+    market_upper = market.upper()
+
+    console.print("[bold cyan]== Swing Scanner 스캔 시작 ==[/bold cyan]")
+    console.print(
+        f"  시장: [bold]{market_upper}[/bold]"
+        f"  |  최소 신뢰도: {min_confidence}"
+        f"  |  skip_fetch: {skip_fetch}"
+    )
+
+    try:
+        summary = run_daily_pipeline(
+            market=market_upper,
+            skip_fetch=skip_fetch,
+            min_confidence=min_confidence,
+            volume_filter=not no_volume_filter,
+            fundamental_filter=with_fundamental_filter,
+            patterns=patterns,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]사용자 중단 요청. 종료합니다.[/yellow]")
+        raise typer.Exit(code=0)
+
+    total_t = summary.get("total_tickers", 0)
+    total_p = summary.get("total_patterns", 0)
+    saved = summary.get("saved_count", 0)
+    duration = summary.get("duration_seconds", 0.0)
+
+    console.print(
+        f"\n[green]스캔 완료[/green]  |  "
+        f"종목: [bold]{total_t}[/bold]  |  "
+        f"패턴 탐지: [bold]{total_p}[/bold]건  |  "
+        f"DB 저장: [bold]{saved}[/bold]건  |  "
+        f"소요: {duration:.1f}초"
+    )
+
+    top_results = summary.get("top_results", [])
+    if top_results:
+        _print_results_table(top_results, title="상위 결과 (TOP 10)", top_n=10)
+
+
+# ---------------------------------------------------------------------------
+# results 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("results")
+def results(
+    date_str: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="조회 날짜 (YYYY-MM-DD 또는 today, 기본: 오늘)",
+    ),
+    pattern: Optional[str] = typer.Option(
+        None, "--pattern", "-p",
+        help="패턴 필터: double_bottom | golden_cross | box_breakout | pullback",
+    ),
+    market: Optional[str] = typer.Option(
+        None, "--market", "-m", help="시장 필터: kr | us",
+    ),
+    top: int = typer.Option(20, "--top", "-n", help="상위 N개 출력"),
+    min_confidence: float = typer.Option(
+        0.0, "--min-confidence", help="최소 신뢰도 점수",
+    ),
+    passed_only: bool = typer.Option(
+        False, "--passed-only", help="거래량·재무 필터 통과 종목만 표시",
+    ),
+) -> None:
+    """스캔 결과를 조회해 테이블로 출력한다.
+
+    Args:
+        date_str       : 조회 날짜 (기본: 오늘).
+        pattern        : 패턴 이름 필터.
+        market         : 시장 코드 필터.
+        top            : 출력할 최대 행 수.
+        min_confidence : 최소 신뢰도 점수.
+        passed_only    : 필터 통과 종목만 출력.
+    """
+    from sqlalchemy import select
+
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.db.models import Universe
+    from scanner.db.repository import get_scan_results
+    from scanner.db.session import get_session
+
+    setup_logger()
+    init_database()
+
+    target_date = _parse_date(date_str)
+
+    market_tickers: list[str] | None = None
+    if market:
+        with get_session() as session:
+            market_tickers = list(
+                session.execute(
+                    select(Universe.ticker)
+                    .where(Universe.market == market.upper())
+                    .where(Universe.is_active.is_(True))
+                ).scalars().all()
+            )
+        if not market_tickers:
+            console.print(
+                f"[yellow]{market.upper()} 시장 종목이 없습니다. "
+                f"'scanner update-universe --market {market.lower()}' 를 먼저 실행하세요.[/yellow]"
+            )
+            raise typer.Exit(code=0)
+
+    with get_session() as session:
+        rows = get_scan_results(
+            scan_date=target_date,
+            session=session,
+            market_tickers=market_tickers,
+            min_score=min_confidence if min_confidence > 0 else None,
+            passed_filters_only=passed_only,
+        )
+
+    if pattern:
+        rows = [r for r in rows if r.pattern_name == pattern]
+
+    if not rows:
+        console.print(
+            f"[yellow]{target_date} 날짜에 조건에 맞는 스캔 결과가 없습니다.[/yellow]"
+        )
+        raise typer.Exit(code=0)
+
+    _print_results_table(rows[:top], title=f"스캔 결과 — {target_date}", top_n=top)
+    console.print(f"[dim]총 {len(rows)}건 중 {min(top, len(rows))}건 표시[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# show 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("show")
+def show(
+    ticker: str = typer.Argument(..., help="종목 코드 (예: 005930, AAPL)"),
+    date_str: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="조회 날짜 (YYYY-MM-DD 또는 today, 기본: 오늘)",
+    ),
+) -> None:
+    """특정 종목의 스캔 결과 상세를 출력한다.
+
+    Args:
+        ticker  : 종목 코드.
+        date_str: 조회 날짜 (기본: 오늘).
+    """
+    from rich.panel import Panel
+    from rich.table import Table
+    from sqlalchemy import select
+
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.db.models import ScanResult
+    from scanner.db.session import get_session
+
+    setup_logger()
+    init_database()
+
+    target_date = _parse_date(date_str)
+    ticker_upper = ticker.upper()
+
+    with get_session() as session:
+        rows = session.execute(
+            select(ScanResult)
+            .where(ScanResult.scan_date == target_date)
+            .where(ScanResult.ticker == ticker_upper)
+            .order_by(ScanResult.confidence_score.desc())
+        ).scalars().all()
+
+    if not rows:
+        console.print(
+            f"[yellow]{ticker_upper} 종목의 {target_date} 스캔 결과가 없습니다.[/yellow]"
+        )
+        raise typer.Exit(code=0)
+
+    for row in rows:
+        display, color = PATTERN_STYLES.get(row.pattern_name, (row.pattern_name, "white"))
+
+        tbl = Table(show_header=False, padding=(0, 2))
+        tbl.add_column("항목", style="cyan", min_width=16)
+        tbl.add_column("값")
+
+        tbl.add_row("패턴", _pattern_markup(row.pattern_name))
+        tbl.add_row("신뢰도 점수", f"[bold]{row.confidence_score:.1f}[/bold] / 100")
+        tbl.add_row("진입가", f"{row.entry_price:,.2f}" if row.entry_price else "-")
+        tbl.add_row("손절가", f"{row.stop_loss:,.2f}" if row.stop_loss else "-")
+        tbl.add_row("목표가", f"{row.target_price:,.2f}" if row.target_price else "-")
+        tbl.add_row(
+            "손익비",
+            f"1 : {row.risk_reward_ratio:.2f}" if row.risk_reward_ratio else "-",
+        )
+        tbl.add_row("주봉 추세", row.trend_weekly or "-")
+        tbl.add_row(
+            "필터 통과",
+            "[green]✓ 통과[/green]" if row.passed_filters else "[red]✗ 미통과[/red]",
+        )
+
+        if row.pattern_details:
+            tbl.add_row("", "")
+            for k, v in row.pattern_details.items():
+                tbl.add_row(f"  {k}", str(v))
+
+        console.print(
+            Panel(
+                tbl,
+                title=f"[bold {color}]{ticker_upper} — {display}[/bold {color}]",
+                border_style=color,
+            )
+        )
+
+
 if __name__ == "__main__":
     app()
