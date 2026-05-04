@@ -251,7 +251,7 @@ def fetch_us_fundamental(ticker: str) -> pd.DataFrame:
         ticker: Yahoo Finance 티커.
 
     Returns:
-        columns = [ticker, date, per, pbr, market_cap]
+        columns = [ticker, date, per, pbr]
         단일 행 (오늘 날짜 스냅샷).
     """
     _require_yfinance()
@@ -284,7 +284,6 @@ def fetch_us_fundamental(ticker: str) -> pd.DataFrame:
             "date": today,
             "per": info.get("trailingPE") or info.get("forwardPE"),
             "pbr": info.get("priceToBook"),
-            "market_cap": info.get("marketCap"),
         }
         return pd.DataFrame([row])
 
