@@ -325,6 +325,18 @@
     });
   }
 
+  /* 캔들 날짜에 맞춰 시리즈를 정렬·패딩한다.
+     RSI(첫 14일 NaN), MA60(첫 60일 NaN) 처럼 길이가 짧은 시리즈도
+     캔들과 같은 인덱스 길이를 갖도록 WhitespaceData({time}만)로 채워 넣는다.
+     이렇게 해야 모든 차트의 logical range가 동일해 스크롤 동기화가 정확해진다. */
+  function alignToCandles(seriesData) {
+    const map = new Map((seriesData || []).map(d => [d.time, d.value]));
+    return (OHLCV.candles || []).map(c => {
+      const v = map.get(c.time);
+      return v !== undefined ? { time: c.time, value: v } : { time: c.time };
+    });
+  }
+
   /* 공통 차트 옵션 */
   const BASE = {
     layout: {
@@ -372,7 +384,7 @@
       chartCandle.addLineSeries({
         color, lineWidth: width,
         priceLineVisible: false, lastValueVisible: false,
-      }).setData(toTs(OHLCV[key]));
+      }).setData(toTs(alignToCandles(OHLCV[key])));
     }
   });
 
@@ -424,7 +436,7 @@
         margins: { above: 0, below: 0 },
       }),
     });
-    rsiSeries.setData(toTs(OHLCV.rsi));
+    rsiSeries.setData(toTs(alignToCandles(OHLCV.rsi)));
     rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '70' });
     rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '30' });
     rsiSeries.createPriceLine({ price: 50, color: '#30363d', lineWidth: 1, lineStyle: 3, axisLabelVisible: false });
@@ -450,18 +462,20 @@
     }
   });
 
-  /* ── 시간축 동기화 (시간 기반 — 데이터 수 차이에도 정확히 정렬) */
-  let timeSyncing = false;
+  /* ── 시간축 동기화 (logical range 기반)
+     모든 시리즈를 alignToCandles 로 같은 길이로 패딩했기 때문에
+     인덱스가 일치하며, 스크롤·줌 시 매 프레임마다 즉시 동기화된다. */
+  let logicalSyncing = false;
   const allThree = [chartCandle, chartVol, chartRsi];
   allThree.forEach(src => {
-    src.timeScale().subscribeVisibleTimeRangeChange(range => {
-      if (timeSyncing || range === null) return;
-      timeSyncing = true;
+    src.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (logicalSyncing || range === null) return;
+      logicalSyncing = true;
       allThree.forEach(dst => {
         if (dst === src) return;
-        try { dst.timeScale().setVisibleRange(range); } catch (_) {}
+        try { dst.timeScale().setVisibleLogicalRange(range); } catch (_) {}
       });
-      timeSyncing = false;
+      logicalSyncing = false;
     });
   });
 
