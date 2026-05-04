@@ -868,5 +868,53 @@ def export(
     console.print(f"[green]✓ 내보내기 완료[/green] → {out}")
 
 
+# ---------------------------------------------------------------------------
+# serve 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="바인드 호스트"),
+    port: int = typer.Option(8000, "--port", "-p", help="포트 번호"),
+    reload: bool = typer.Option(False, "--reload", help="코드 변경 시 자동 재시작"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="브라우저 자동 열기"),
+) -> None:
+    """FastAPI 대시보드 서버를 시작한다.
+
+    기본 주소: http://127.0.0.1:8000
+    API 문서:  http://127.0.0.1:8000/docs
+    """
+    import threading
+    import time
+    import webbrowser
+
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+
+    setup_logger()
+    init_database()
+
+    url = f"http://{host}:{port}"
+    console.print(f"[bold cyan]Swing Scanner 대시보드 시작[/bold cyan]")
+    console.print(f"  서버:    {url}")
+    console.print(f"  API 문서: {url}/docs")
+    console.print(f"  종료:    Ctrl+C")
+
+    if open_browser:
+        def _open() -> None:
+            time.sleep(1.5)
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+
+    import uvicorn
+    uvicorn.run(
+        "scanner.api.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="warning",
+    )
+
+
 if __name__ == "__main__":
     app()
