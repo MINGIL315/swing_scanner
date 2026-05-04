@@ -4,8 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from scanner.db.models import ScanResult as ScanResultORM
@@ -18,57 +17,51 @@ def save_scan_results(
 ) -> int:
     """TickerScanResult 목록을 scan_results 테이블에 저장한다.
 
-    같은 (scan_date, ticker, pattern_name) 조합이 이미 있으면
-    confidence_score 등 수치 컬럼을 업데이트한다 (upsert).
+    같은 (scan_date, ticker) 의 기존 행을 삭제한 뒤 새 행을 삽입한다.
+    (하루에 한 번 전체 재스캔을 가정하므로 delete-then-insert 가 적합하다.)
 
     Args:
         results: scan_universe() 또는 analyze_ticker()의 반환값 목록.
         session: SQLAlchemy 세션.
 
     Returns:
-        저장(upsert)된 행 수.
+        삽입된 행 수.
     """
-    rows: list[dict[str, Any]] = []
+    if not results:
+        return 0
 
+    # 이미 존재하는 같은 날짜/종목 행 삭제
+    tickers = list({r.ticker for r in results})
+    scan_dates = list({r.scan_date for r in results})
+    for scan_date in scan_dates:
+        session.execute(
+            delete(ScanResultORM)
+            .where(ScanResultORM.scan_date == scan_date)
+            .where(ScanResultORM.ticker.in_(tickers))
+        )
+
+    orm_rows: list[ScanResultORM] = []
     for res in results:
         passed_both = res.passed_volume and res.passed_fundamental
         for pattern_result, score in zip(res.pattern_results, res.confidence_scores):
-            rows.append({
-                "scan_date": res.scan_date,
-                "ticker": res.ticker,
-                "pattern_name": pattern_result.pattern_name,
-                "confidence_score": score,
-                "entry_price": pattern_result.entry_price,
-                "stop_loss": pattern_result.stop_loss,
-                "target_price": pattern_result.target_price,
-                "risk_reward_ratio": pattern_result.risk_reward_ratio,
-                "entry_signal_strength": None,
-                "entry_signals": None,
-                "pattern_details": pattern_result.details,
-                "trend_weekly": pattern_result.details.get("weekly_trend"),
-                "passed_filters": passed_both,
-            })
+            orm_rows.append(ScanResultORM(
+                scan_date=res.scan_date,
+                ticker=res.ticker,
+                pattern_name=pattern_result.pattern_name,
+                confidence_score=score,
+                entry_price=pattern_result.entry_price,
+                stop_loss=pattern_result.stop_loss,
+                target_price=pattern_result.target_price,
+                risk_reward_ratio=pattern_result.risk_reward_ratio,
+                entry_signal_strength=None,
+                entry_signals=None,
+                pattern_details=pattern_result.details,
+                trend_weekly=pattern_result.details.get("weekly_trend"),
+                passed_filters=passed_both,
+            ))
 
-    if not rows:
-        return 0
-
-    stmt = sqlite_insert(ScanResultORM).values(rows)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=None,
-        index_where=None,
-        set_={
-            "confidence_score": stmt.excluded.confidence_score,
-            "entry_price": stmt.excluded.entry_price,
-            "stop_loss": stmt.excluded.stop_loss,
-            "target_price": stmt.excluded.target_price,
-            "risk_reward_ratio": stmt.excluded.risk_reward_ratio,
-            "pattern_details": stmt.excluded.pattern_details,
-            "trend_weekly": stmt.excluded.trend_weekly,
-            "passed_filters": stmt.excluded.passed_filters,
-        },
-    )
-    session.execute(stmt)
-    return len(rows)
+    session.add_all(orm_rows)
+    return len(orm_rows)
 
 
 def get_scan_results(
