@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swing-scanner"
+version = "0.1.0"
+description = "스윙매매 차트 발굴 시스템 — KR(코스피200) + US(S&P500) 멀티 타임프레임 스캐너"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Mingil" }]
+license = { text = "MIT" }
+keywords = ["stock", "swing-trading", "technical-analysis", "korea", "us", "pykrx", "yfinance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    "pykrx>=1.0.45",
+    "yfinance>=0.2.40",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "sqlalchemy>=2.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "typer>=0.12",
+    "rich>=13.7",
+    "loguru>=0.7",
+    "openpyxl>=3.1",
+    "jinja2>=3.1",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+scanner = "scanner.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanner*"]
+exclude = ["tests*", "scripts*", "web*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
