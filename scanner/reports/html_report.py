@@ -238,13 +238,31 @@ def _load_ohlcv(ticker: str, session: Session, lookback: int = 120) -> pd.DataFr
     ])
 
 
-def _build_ohlcv_json(df: pd.DataFrame) -> str:
-    """OHLCV DataFrame 을 TradingView Lightweight Charts 포맷 JSON 문자열로 변환한다."""
+_EMPTY_TF: dict[str, list] = {
+    "candles": [], "volume": [], "ma5": [], "ma20": [], "ma60": [], "rsi": [],
+}
+
+
+def _to_weekly(daily_df: pd.DataFrame) -> pd.DataFrame:
+    """일봉 DataFrame을 주봉으로 리샘플링한다 (date 컬럼 유지)."""
+    from scanner.patterns.pullback import _resample_weekly  # 순환 import 방지
+
+    if daily_df.empty:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+
+    weekly = _resample_weekly(daily_df.copy())
+    if weekly.empty:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+
+    weekly = weekly.rename(columns={"week_start_date": "date"})
+    weekly["date"] = pd.to_datetime(weekly["date"]).dt.strftime("%Y-%m-%d")
+    return weekly
+
+
+def _build_tf_payload(df: pd.DataFrame) -> dict[str, list]:
+    """주어진 OHLCV DataFrame에서 차트용 dict({candles, volume, ma5/20/60, rsi})를 만든다."""
     if df.empty:
-        empty: dict[str, list] = {
-            "candles": [], "volume": [], "ma5": [], "ma20": [], "ma60": [], "rsi": [],
-        }
-        return json.dumps(empty)
+        return {k: [] for k in _EMPTY_TF}
 
     dates = df["date"].tolist()
     close = df["close"].reset_index(drop=True)
@@ -272,7 +290,6 @@ def _build_ohlcv_json(df: pd.DataFrame) -> str:
         }
         for _, row in df.iterrows()
     ]
-
     volume = [
         {
             "time":  row["date"],
@@ -282,15 +299,27 @@ def _build_ohlcv_json(df: pd.DataFrame) -> str:
         for _, row in df.iterrows()
     ]
 
+    return {
+        "candles": candles,
+        "volume":  volume,
+        "ma5":     _to_tv(ma5),
+        "ma20":    _to_tv(ma20),
+        "ma60":    _to_tv(ma60),
+        "rsi":     _to_tv(rsi_vals),
+    }
+
+
+def _build_ohlcv_json(df: pd.DataFrame) -> str:
+    """일봉 DataFrame을 받아 일/주봉 페이로드를 묶은 JSON 문자열을 반환한다.
+
+    출력 구조: {"daily": {...}, "weekly": {...}}
+    - daily : 입력 그대로
+    - weekly: _resample_weekly() 리샘플 결과
+    """
+    daily_payload  = _build_tf_payload(df)
+    weekly_payload = _build_tf_payload(_to_weekly(df))
     return json.dumps(
-        {
-            "candles": candles,
-            "volume":  volume,
-            "ma5":     _to_tv(ma5),
-            "ma20":    _to_tv(ma20),
-            "ma60":    _to_tv(ma60),
-            "rsi":     _to_tv(rsi_vals),
-        },
+        {"daily": daily_payload, "weekly": weekly_payload},
         ensure_ascii=False,
     )
 
