@@ -1,6 +1,9 @@
 # Swing Scanner
 
-한국(코스피200)과 미국(S&P500) 약 700종목을 매일 자동 스캔해 4가지 상승 패턴(쌍바닥·골든크로스·박스권 돌파·눌림목)을 탐지하고, 신뢰도 점수와 진입/손절/목표가를 제시하는 **스윙매매 차트 발굴 시스템**입니다. 주봉(추세) → 일봉(패턴) → 4시간봉(타이밍)의 멀티 타임프레임으로 가짜 신호를 걸러냅니다.
+한국(코스피200)·미국(S&P500) 약 700종목을 매일 자동 스캔해  
+**쌍바닥·골든크로스·박스권 돌파·눌림목** 4가지 패턴을 탐지하고,  
+신뢰도 점수와 진입/손절/목표가를 제시하는 스윙매매 차트 발굴 시스템입니다.  
+주봉(추세) → 일봉(패턴) → 4시간봉(타이밍)의 멀티 타임프레임으로 가짜 신호를 걸러냅니다.
 
 > 프로젝트의 모든 규칙·임계값·구조는 [`CLAUDE.md`](./CLAUDE.md)에 정의되어 있습니다.
 
@@ -156,6 +159,75 @@ scanner show 035720 --date 2026-05-02
 scanner version
 # swing-scanner 0.1.0
 ```
+
+---
+
+### `scanner backtest`
+
+과거 스캔 결과를 재생해 패턴 성과를 측정합니다.
+
+| 옵션 | 기본값 | 설명 |
+| --- | --- | --- |
+| `--pattern`, `-p` | _(필수)_ | 패턴 이름 |
+| `--period` | `90` | 백테스트 기간 (일) |
+| `--hold` | `10` | 최대 보유 일수 |
+| `--min-score` | `70.0` | 최소 신뢰도 점수 |
+
+```bash
+scanner backtest --pattern double_bottom --period 90 --hold 10
+scanner backtest --pattern golden_cross  --period 180 --min-score 80
+```
+
+---
+
+### `scanner serve`
+
+FastAPI 대시보드 서버를 시작합니다.
+
+| 옵션 | 기본값 | 설명 |
+| --- | --- | --- |
+| `--host` | `127.0.0.1` | 바인드 호스트 |
+| `--port`, `-p` | `8000` | 포트 번호 |
+| `--reload` | `False` | 코드 변경 시 자동 재시작 |
+| `--open/--no-open` | `True` | 브라우저 자동 열기 |
+
+```bash
+scanner serve
+# http://127.0.0.1:8000      — 대시보드
+# http://127.0.0.1:8000/docs — Swagger API 문서
+```
+
+---
+
+## API 엔드포인트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/health` | 서버 상태 |
+| GET | `/api/markets/summary` | 일일 시장 요약 |
+| GET | `/api/scan-results` | 스캔 결과 목록 (필터·정렬) |
+| GET | `/api/stocks/{ticker}/ohlcv` | OHLCV + 이동평균 (차트용) |
+| GET | `/api/stocks/{ticker}/analysis` | 분석 결과 + AI 코멘트 |
+| GET | `/api/patterns` | 패턴 목록 및 오늘 탐지 수 |
+| GET | `/api/patterns/{name}/stats` | 패턴별 통계 |
+| POST | `/api/backtest/run` | 백테스트 실행 |
+
+---
+
+## Windows 자동화
+
+매일 오전 7시에 자동으로 스캔을 실행하려면:
+
+```powershell
+# 관리자 PowerShell에서 실행
+powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1
+
+# 실행 시각 변경 (기본: 07:00)
+powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1 -Time "06:30"
+```
+
+로그는 `logs/daily_scan.log` 에 저장됩니다.  
+수동 실행: `scripts\start_dashboard.bat` 더블클릭.
 
 ---
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swing-scanner"
-version = "0.1.0"
+version = "1.0.0"
 description = "스윙매매 차트 발굴 시스템 — KR(코스피200) + US(S&P500) 멀티 타임프레임 스캐너"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ authors = [{ name = "Mingil" }]
 license = { text = "MIT" }
 keywords = ["stock", "swing-trading", "technical-analysis", "korea", "us", "pykrx", "yfinance"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Financial and Insurance Industry",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",

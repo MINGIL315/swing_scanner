@@ -868,5 +868,146 @@ def export(
     console.print(f"[green]✓ 내보내기 완료[/green] → {out}")
 
 
+# ---------------------------------------------------------------------------
+# backtest 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("backtest")
+def backtest(
+    pattern: str = typer.Option(
+        ..., "--pattern", "-p",
+        help="패턴 이름: double_bottom | golden_cross | box_breakout | pullback",
+    ),
+    period: int = typer.Option(
+        90, "--period", help="백테스트 기간 (일수, 30~730)",
+    ),
+    hold: int = typer.Option(
+        10, "--hold", help="최대 보유 일수 (1~60)",
+    ),
+    min_score: float = typer.Option(
+        70.0, "--min-score", help="최소 신뢰도 점수 (0~100)",
+    ),
+) -> None:
+    """과거 스캔 결과로 패턴 백테스트를 실행한다.
+
+    스캔 DB에 저장된 신호를 재생해 목표가/손절가 도달 여부를 시뮬레이션한다.
+    """
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from scanner.backtest.engine import run_backtest
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+
+    _VALID = {"double_bottom", "golden_cross", "box_breakout", "pullback"}
+    if pattern not in _VALID:
+        console.print(f"[red]알 수 없는 패턴: {pattern}  (가능: {', '.join(sorted(_VALID))})[/red]")
+        raise typer.Exit(code=1)
+
+    setup_logger()
+    init_database()
+
+    console.print(f"[cyan]{pattern}[/cyan] 백테스트 실행 중 (기간={period}일, 보유={hold}일, 최소점수={min_score})...")
+
+    result = run_backtest(
+        pattern_name=pattern,
+        period_days=period,
+        hold_days=hold,
+        min_score=min_score,
+    )
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="cyan", min_width=18)
+    grid.add_column(justify="right", style="bold")
+
+    grid.add_row("패턴",         result["pattern_name"])
+    grid.add_row("기간",         f"{result['period_start']} ~ {result['period_end']}")
+    grid.add_row("최대 보유일",  str(result["hold_days"]))
+    grid.add_row("최소 점수",    str(result["min_score"]))
+    grid.add_row("총 신호",      str(result["total_signals"]))
+    grid.add_row("승리",         f"[green]{result['win_count']}[/green]")
+    grid.add_row("손절",         f"[red]{result['loss_count']}[/red]")
+    grid.add_row("타임아웃",     str(result["timeout_count"]))
+    wr = result["win_rate"] * 100
+    wr_color = "green" if wr >= 50 else "yellow" if wr >= 40 else "red"
+    grid.add_row("승률",         f"[{wr_color}]{wr:.1f}%[/{wr_color}]")
+    grid.add_row("평균 수익률",  f"{result['avg_return_pct']:+.2f}%")
+    grid.add_row("평균 승리 수익", f"[green]{result['avg_win_pct']:+.2f}%[/green]")
+    grid.add_row("평균 손절 손실", f"[red]{result['avg_loss_pct']:+.2f}%[/red]")
+    grid.add_row("수익 팩터",    f"{result['profit_factor']:.2f}")
+    grid.add_row("최대 낙폭",    f"[red]{result['max_drawdown']:.2f}%[/red]")
+
+    console.print(Panel(grid, title=f"[bold]백테스트 결과 — {pattern}[/bold]", border_style="blue"))
+
+    if result["trades"]:
+        tbl = Table(title="최근 거래 내역 (최대 20건)", header_style="bold", show_lines=False)
+        tbl.add_column("종목", style="mono")
+        tbl.add_column("진입일")
+        tbl.add_column("청산일")
+        tbl.add_column("수익률", justify="right")
+        tbl.add_column("결과", justify="center")
+
+        for t in result["trades"][:20]:
+            ret   = t["return_pct"]
+            color = "green" if ret > 0 else "red" if ret < 0 else "white"
+            outcome_icon = {"win": "[green]✓ 목표[/green]", "loss": "[red]✗ 손절[/red]", "timeout": "[yellow]⏱ 만료[/yellow]"}.get(t["outcome"], t["outcome"])
+            tbl.add_row(
+                t["ticker"],
+                t["entry_date"],
+                t["exit_date"] or "-",
+                f"[{color}]{ret:+.2f}%[/{color}]",
+                outcome_icon,
+            )
+        console.print(tbl)
+
+
+# ---------------------------------------------------------------------------
+# serve 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="바인드 호스트"),
+    port: int = typer.Option(8000, "--port", "-p", help="포트 번호"),
+    reload: bool = typer.Option(False, "--reload", help="코드 변경 시 자동 재시작"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="브라우저 자동 열기"),
+) -> None:
+    """FastAPI 대시보드 서버를 시작한다.
+
+    기본 주소: http://127.0.0.1:8000
+    API 문서:  http://127.0.0.1:8000/docs
+    """
+    import threading
+    import time
+    import webbrowser
+
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+
+    setup_logger()
+    init_database()
+
+    url = f"http://{host}:{port}"
+    console.print(f"[bold cyan]Swing Scanner 대시보드 시작[/bold cyan]")
+    console.print(f"  서버:    {url}")
+    console.print(f"  API 문서: {url}/docs")
+    console.print(f"  종료:    Ctrl+C")
+
+    if open_browser:
+        def _open() -> None:
+            time.sleep(1.5)
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+
+    import uvicorn
+    uvicorn.run(
+        "scanner.api.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="warning",
+    )
+
+
 if __name__ == "__main__":
     app()
