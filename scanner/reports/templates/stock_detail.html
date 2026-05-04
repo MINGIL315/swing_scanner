@@ -343,14 +343,17 @@
     return `${dow} ${y}-${m}-${day}`;
   }
 
+  /* "YYYY-MM-DD" 단일 문자열 → UTCTimestamp(초) */
+  function dateStrToTs(s) {
+    const [y, m, d] = String(s).split('-');
+    return Date.UTC(+y, +m - 1, +d) / 1000;
+  }
+
   /* "YYYY-MM-DD" 배열 → UTCTimestamp(초) 배열.
      LightweightCharts v4는 BusinessDay(문자열) 모드에서 dateFormatter를
      크로스헤어 레이블에 적용하지 않는다. UTCTimestamp(숫자) 모드로 강제해야 한다. */
   function toTs(arr) {
-    return (arr || []).map(d => {
-      const [y, m, day] = String(d.time).split('-');
-      return { ...d, time: Date.UTC(+y, +m - 1, +day) / 1000 };
-    });
+    return (arr || []).map(d => ({ ...d, time: dateStrToTs(d.time) }));
   }
 
   /* 캔들 날짜에 맞춰 시리즈를 정렬·패딩한다.
@@ -556,7 +559,7 @@
     });
 
     rebuildLookupMaps(currentData);
-    allThree.forEach(c => c.timeScale().fitContent());
+    fitInitialView();
 
     document.querySelectorAll('.tf-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.tf === tf));
@@ -651,8 +654,23 @@
     });
   });
 
-  /* ── 초기 피팅 ─────────────────────────────────────────────── */
-  allThree.forEach(c => c.timeScale().fitContent());
+  /* ── 초기 표시 범위 ───────────────────────────────────────────
+     일봉: 데이터가 길어도(2022~) 처음에는 최근 N봉만 노출. 사용자가 휠/드래그로 과거 탐색.
+     주봉: 전체 구간 fit (24~220주 정도라 부담 없음). */
+  const DAILY_INITIAL_BARS = 120;
+  function fitInitialView() {
+    if (currentTf === 'daily'
+        && currentData.candles
+        && currentData.candles.length > DAILY_INITIAL_BARS) {
+      const arr  = currentData.candles;
+      const from = dateStrToTs(arr[arr.length - DAILY_INITIAL_BARS].time);
+      const to   = dateStrToTs(arr[arr.length - 1].time);
+      allThree.forEach(c => c.timeScale().setVisibleRange({ from, to }));
+    } else {
+      allThree.forEach(c => c.timeScale().fitContent());
+    }
+  }
+  fitInitialView();
 
 })();
 </script>

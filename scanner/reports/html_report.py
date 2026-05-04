@@ -38,6 +38,12 @@ from scanner.reports.comment_generator import generate_comment
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
+# 차트에 로드할 일봉 시작 일자. 주봉 MA60(60주) 및 detect_weekly_trend(64주)가
+# 의미를 갖도록 약 4년치 데이터를 확보한다.
+_CHART_START_DATE: date = date(2022, 1, 1)
+# 일봉 차트의 초기 표시 봉 수 (사용자는 휠/드래그로 그 이전을 볼 수 있다).
+_DAILY_INITIAL_BARS: int = 120
+
 PATTERN_LABELS: dict[str, str] = {
     "double_bottom": "쌍바닥",
     "golden_cross":  "골든크로스",
@@ -102,7 +108,7 @@ def generate_daily_report(scan_date: date | None = None) -> Path:
         # ── 종목 상세 페이지 ────────────────────────────────────────
         for row in rows:
             ticker = row["ticker"]
-            df_ohlcv = _load_ohlcv(ticker, session)
+            df_ohlcv = _load_ohlcv(ticker, session, start_date=_CHART_START_DATE)
             ohlcv_json = _build_ohlcv_json(df_ohlcv)
 
             html = env.get_template("stock_detail.html").render(
@@ -212,19 +218,24 @@ def _count_active_tickers(session: Session) -> int:
     return len(list(session.execute(stmt).scalars().all()))
 
 
-def _load_ohlcv(ticker: str, session: Session, lookback: int = 120) -> pd.DataFrame:
-    """일봉 OHLCV 최근 N행을 날짜 오름차순으로 반환한다."""
-    stmt = (
-        select(OHLCVDaily)
-        .where(OHLCVDaily.ticker == ticker)
-        .order_by(OHLCVDaily.date.desc())
-        .limit(lookback)
-    )
+def _load_ohlcv(
+    ticker: str,
+    session: Session,
+    start_date: date | None = None,
+) -> pd.DataFrame:
+    """일봉 OHLCV를 start_date(포함) 이후로 날짜 오름차순 반환한다.
+
+    start_date=None 이면 전체 데이터를 반환한다.
+    """
+    stmt = select(OHLCVDaily).where(OHLCVDaily.ticker == ticker)
+    if start_date is not None:
+        stmt = stmt.where(OHLCVDaily.date >= start_date)
+    stmt = stmt.order_by(OHLCVDaily.date.asc())
+
     rows = list(session.execute(stmt).scalars().all())
     if not rows:
         return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
 
-    rows.sort(key=lambda r: r.date)
     return pd.DataFrame([
         {
             "date":   r.date.isoformat(),
