@@ -119,5 +119,132 @@ def fetch_all(
     run_data_pipeline(market=market.upper(), start=start, end=today)
 
 
+@app.command("test-pattern")
+def test_pattern(
+    ticker: str = typer.Argument(..., help="종목 코드 (예: 005930, AAPL)"),
+    pattern: Optional[str] = typer.Option(
+        None,
+        "--pattern",
+        "-p",
+        help="패턴 이름: double_bottom | golden_cross | box_breakout | pullback (기본: 전체)",
+    ),
+    days: int = typer.Option(500, "--days", "-d", help="최근 N일 데이터 로드"),
+) -> None:
+    """특정 종목에 패턴 탐지기를 실행해 디버그 결과를 출력한다."""
+    from datetime import date, timedelta
+
+    from rich.table import Table
+
+    from scanner.config import setup_logger
+    from scanner.data.pipeline import _fetch_ohlcv_one, _get_market
+    from scanner.db.migrations import init_database
+    from scanner.db.session import get_session
+    from scanner.db.models import OHLCVDaily
+    from scanner.patterns import ALL_DETECTORS, get_detector
+
+    setup_logger()
+    init_database()
+
+    # ── 데이터 로드 ────────────────────────────────────────────────
+    # DB 에서 먼저 시도, 없으면 직접 수집
+    import pandas as pd
+    from sqlalchemy import select
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=days)
+
+    with get_session() as session:
+        rows = session.execute(
+            select(OHLCVDaily)
+            .where(OHLCVDaily.ticker == ticker)
+            .where(OHLCVDaily.date >= start_date)
+            .order_by(OHLCVDaily.date)
+        ).scalars().all()
+
+    if rows:
+        df = pd.DataFrame([
+            {
+                "date": r.date,
+                "open": r.open,
+                "high": r.high,
+                "low": r.low,
+                "close": r.close,
+                "volume": r.volume,
+            }
+            for r in rows
+        ])
+        console.print(f"[dim]DB에서 {len(df)}행 로드[/dim]")
+    else:
+        console.print(f"[yellow]DB 데이터 없음. {ticker} 직접 수집 중...[/yellow]")
+        market = _get_market(ticker)
+        result_tuple = _fetch_ohlcv_one(ticker, market, start_date, end_date)
+        if not result_tuple[1]:
+            console.print(f"[red]데이터 수집 실패: {result_tuple[2]}[/red]")
+            raise typer.Exit(code=1)
+        # 수집 후 DB 재조회
+        with get_session() as session:
+            rows = session.execute(
+                select(OHLCVDaily)
+                .where(OHLCVDaily.ticker == ticker)
+                .where(OHLCVDaily.date >= start_date)
+                .order_by(OHLCVDaily.date)
+            ).scalars().all()
+        df = pd.DataFrame([
+            {"date": r.date, "open": r.open, "high": r.high,
+             "low": r.low, "close": r.close, "volume": r.volume}
+            for r in rows
+        ])
+        console.print(f"[dim]수집 후 {len(df)}행 로드[/dim]")
+
+    if df.empty:
+        console.print("[red]데이터가 없습니다.[/red]")
+        raise typer.Exit(code=1)
+
+    # ── 탐지기 선택 ────────────────────────────────────────────────
+    if pattern:
+        detector = get_detector(pattern)
+        if detector is None:
+            valid = ", ".join(d.name for d in ALL_DETECTORS)
+            console.print(f"[red]알 수 없는 패턴: {pattern}. 가능한 값: {valid}[/red]")
+            raise typer.Exit(code=1)
+        detectors = [detector]
+    else:
+        detectors = ALL_DETECTORS
+
+    # ── 패턴 탐지 실행 ─────────────────────────────────────────────
+    found_any = False
+    for det in detectors:
+        console.rule(f"[bold]{det.display_name}[/bold] ({det.name})")
+        result = det.detect(df, ticker)
+        if result is None:
+            console.print("[yellow]  → 탐지되지 않음[/yellow]")
+            continue
+
+        found_any = True
+        sig = det.entry_signal(df)
+
+        tbl = Table(show_header=False, padding=(0, 1))
+        tbl.add_column("항목", style="cyan")
+        tbl.add_column("값")
+
+        tbl.add_row("탐지일", str(result.detected_at))
+        tbl.add_row("진입가", f"{result.entry_price:,.4f}")
+        tbl.add_row("손절가", f"{result.stop_loss:,.4f}")
+        tbl.add_row("목표가", f"{result.target_price:,.4f}")
+        tbl.add_row("손익비", str(result.risk_reward_ratio))
+        tbl.add_row("패턴 점수", f"{result.raw_score:.1f} / 100")
+        tbl.add_row("진입 강도", f"{sig.strength:.0f} / 100")
+        for sig_name, sig_val in sig.signals.items():
+            mark = "[green]✓[/green]" if sig_val else "[red]✗[/red]"
+            tbl.add_row(f"  {sig_name}", mark)
+        for k, v in result.details.items():
+            tbl.add_row(f"  {k}", str(v))
+
+        console.print(tbl)
+
+    if not found_any:
+        console.print("\n[bold yellow]탐지된 패턴 없음[/bold yellow]")
+
+
 if __name__ == "__main__":
     app()
