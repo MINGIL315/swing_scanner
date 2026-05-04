@@ -47,6 +47,7 @@ class TickerScanResult:
     passed_fundamental: bool = False
     volume_details: dict[str, Any] = field(default_factory=dict)
     fundamental_details: dict[str, Any] = field(default_factory=dict)
+    weekly_direction: str = "sideways"
 
 
 def analyze_ticker(
@@ -76,6 +77,7 @@ def analyze_ticker(
 
     # ── 주봉 추세 (점수 계산에 공유) ────────────────────────────
     weekly_direction, weekly_strength = _get_weekly_trend(daily_df)
+    result.weekly_direction = weekly_direction
 
     # ── 패턴 탐지 + 점수 계산 ────────────────────────────────────
     for detector in ALL_DETECTORS:

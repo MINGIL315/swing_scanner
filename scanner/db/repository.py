@@ -56,7 +56,7 @@ def save_scan_results(
                 entry_signal_strength=None,
                 entry_signals=None,
                 pattern_details=pattern_result.details,
-                trend_weekly=pattern_result.details.get("weekly_trend"),
+                trend_weekly=res.weekly_direction,
                 passed_filters=passed_both,
             ))
 

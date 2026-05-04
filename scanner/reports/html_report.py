@@ -76,7 +76,7 @@ def generate_daily_report(scan_date: date | None = None) -> Path:
 
     with get_session() as session:
         rows_orm = get_scan_results(
-            scan_date, session, min_score=settings_threshold(), passed_filters_only=False
+            scan_date, session, min_score=None, passed_filters_only=False
         )
         rows = _attach_market(rows_orm, session)
         name_map = _load_ticker_names(session)
