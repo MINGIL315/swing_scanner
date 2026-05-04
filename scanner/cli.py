@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import typer
+from loguru import logger
 from rich.console import Console
 
 app = typer.Typer(
@@ -244,6 +245,514 @@ def test_pattern(
 
     if not found_any:
         console.print("\n[bold yellow]탐지된 패턴 없음[/bold yellow]")
+
+
+# ---------------------------------------------------------------------------
+# 패턴 표시 상수 (색상 + 한국어 이름)
+# ---------------------------------------------------------------------------
+
+PATTERN_STYLES: dict[str, tuple[str, str]] = {
+    "double_bottom": ("쌍바닥", "cyan"),
+    "golden_cross": ("골든크로스", "yellow"),
+    "box_breakout": ("박스 돌파", "magenta"),
+    "pullback": ("눌림목", "green"),
+}
+
+
+# ---------------------------------------------------------------------------
+# 내부 헬퍼
+# ---------------------------------------------------------------------------
+
+def _parse_date(date_str: str | None) -> "date":
+    """날짜 문자열을 date 객체로 변환한다.
+
+    Args:
+        date_str: "YYYY-MM-DD" 또는 "today" 또는 None (→ 오늘).
+
+    Returns:
+        date 객체.
+    """
+    from datetime import date as _date
+
+    if date_str is None or date_str.lower() == "today":
+        return _date.today()
+    try:
+        return _date.fromisoformat(date_str)
+    except ValueError:
+        console.print(f"[red]날짜 형식 오류: {date_str}  (YYYY-MM-DD 또는 today 사용)[/red]")
+        raise typer.Exit(code=1)
+
+
+def _pattern_markup(pattern_name: str) -> str:
+    """패턴명을 색상 markup 문자열로 변환한다."""
+    display, color = PATTERN_STYLES.get(pattern_name, (pattern_name, "white"))
+    return f"[{color}]{display}[/{color}]"
+
+
+def _print_results_table(rows: list, title: str, top_n: int = 20) -> None:
+    """ScanResult ORM 목록을 Rich 테이블로 출력한다.
+
+    Args:
+        rows  : ScanResult ORM 인스턴스 목록 (confidence_score 내림차순 가정).
+        title : 테이블 제목.
+        top_n : 출력할 최대 행 수.
+    """
+    from rich.table import Table
+
+    tbl = Table(title=title, show_lines=False, header_style="bold")
+    tbl.add_column("#", style="dim", width=4, justify="right")
+    tbl.add_column("종목", min_width=10)
+    tbl.add_column("패턴", min_width=12)
+    tbl.add_column("점수", justify="right", min_width=6)
+    tbl.add_column("진입가", justify="right", min_width=10)
+    tbl.add_column("손절가", justify="right", min_width=10)
+    tbl.add_column("목표가", justify="right", min_width=10)
+    tbl.add_column("R:R", justify="right", min_width=5)
+    tbl.add_column("주봉", min_width=8)
+    tbl.add_column("필터", justify="center", min_width=4)
+
+    for i, row in enumerate(rows[:top_n], 1):
+        pname = row.pattern_name
+        display, color = PATTERN_STYLES.get(pname, (pname, "white"))
+        score = row.confidence_score
+        if score >= 80:
+            score_str = f"[bold green]{score:.1f}[/bold green]"
+        elif score >= 70:
+            score_str = f"[bold yellow]{score:.1f}[/bold yellow]"
+        else:
+            score_str = f"{score:.1f}"
+
+        tbl.add_row(
+            str(i),
+            row.ticker,
+            f"[{color}]{display}[/{color}]",
+            score_str,
+            f"{row.entry_price:,.2f}" if row.entry_price else "-",
+            f"{row.stop_loss:,.2f}" if row.stop_loss else "-",
+            f"{row.target_price:,.2f}" if row.target_price else "-",
+            f"1:{row.risk_reward_ratio:.1f}" if row.risk_reward_ratio else "-",
+            row.trend_weekly or "-",
+            "[green]✓[/green]" if row.passed_filters else "[red]✗[/red]",
+        )
+
+    console.print(tbl)
+
+
+# ---------------------------------------------------------------------------
+# scan 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("scan")
+def scan(
+    market: str = typer.Option(
+        "all", "--market", "-m", help="스캔 시장: kr | us | all",
+    ),
+    pattern: Optional[str] = typer.Option(
+        None, "--pattern", "-p",
+        help="패턴 필터 (쉼표 구분, 예: pullback,box_breakout)",
+    ),
+    min_confidence: float = typer.Option(
+        70.0, "--min-confidence", help="최소 신뢰도 점수 (0~100)",
+    ),
+    no_volume_filter: bool = typer.Option(
+        False, "--no-volume-filter", help="거래량 필터 비활성화",
+    ),
+    with_fundamental_filter: bool = typer.Option(
+        False, "--with-fundamental-filter", help="재무 필터 활성화",
+    ),
+    skip_fetch: bool = typer.Option(
+        False, "--skip-fetch", help="데이터 fetch 생략 (DB 기존 데이터로 스캔)",
+    ),
+) -> None:
+    """전체 파이프라인을 실행한다.
+
+    fetch → scan_universe → DB 저장 → 결과 요약 출력.
+    """
+    import concurrent.futures as cf
+    import time
+    from datetime import date, timedelta
+
+    from rich.panel import Panel
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+        TimeRemainingColumn,
+    )
+    from rich.table import Table
+
+    from scanner.config import FETCH_MAX_WORKERS, setup_logger
+    from scanner.data.universe import get_active_tickers
+    from scanner.db.migrations import init_database
+    from scanner.db.repository import get_scan_results, save_scan_results
+    from scanner.db.session import get_session
+    from scanner.pipeline import (
+        _load_daily_dfs,
+        _load_fundamentals,
+        _load_market_map,
+        _maybe_update_universe,
+    )
+    from scanner.scanner import analyze_ticker
+
+    setup_logger()
+    init_database()
+
+    patterns = [p.strip() for p in pattern.split(",")] if pattern else None
+    market_upper = market.upper()
+
+    console.print(Panel(
+        f"시장: [bold]{market_upper}[/bold]  |  "
+        f"최소 신뢰도: [bold]{min_confidence}[/bold]  |  "
+        f"fetch 건너뜀: [bold]{skip_fetch}[/bold]",
+        title="[bold cyan]Swing Scanner — 스캔 시작[/bold cyan]",
+        border_style="cyan",
+    ))
+    logger.info("scan 명령어 시작 | market={} skip_fetch={} min_confidence={}", market_upper, skip_fetch, min_confidence)
+
+    t_start = time.monotonic()
+
+    # ── Phase 1: 유니버스 확인 + 데이터 fetch ─────────────────────────
+    logger.info("Phase 1 진입: 유니버스 확인 + 데이터 fetch")
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task1 = progress.add_task("[bold]유니버스 확인 중...[/bold]", total=None)
+            _maybe_update_universe(market_upper)
+            progress.update(task1, description="[green]✓ 유니버스 확인[/green]")
+
+            if not skip_fetch:
+                progress.update(task1, description="[bold]데이터 fetch 중...[/bold]")
+                from scanner.data.pipeline import run_data_pipeline
+                end_date = date.today()
+                start_date = end_date - timedelta(days=365)
+                run_data_pipeline(market=market_upper, start=start_date, end=end_date)
+                progress.update(task1, description="[green]✓ 데이터 fetch 완료[/green]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]fetch 단계에서 중단. 저장할 결과가 없습니다.[/yellow]")
+        logger.warning("사용자 중단 — fetch 단계")
+        raise typer.Exit(code=0)
+
+    console.print("[dim]✓ Phase 1: 유니버스 + 데이터 fetch[/dim]")
+    logger.info("Phase 1 완료")
+
+    # ── Phase 2: 데이터 로드 ─────────────────────────────────────────
+    logger.info("Phase 2 진입: 일봉 데이터 로드")
+    tickers = get_active_tickers(market_upper)
+    if not tickers:
+        console.print("[yellow]활성 종목이 없습니다. 유니버스 갱신 필요.[/yellow]")
+        logger.warning("활성 종목 없음 — 조기 종료")
+        raise typer.Exit(code=0)
+
+    daily_dfs = _load_daily_dfs(tickers)
+    market_map = _load_market_map(tickers)
+    fundamentals_map = _load_fundamentals(tickers) if with_fundamental_filter else None
+    logger.info("데이터 로드 완료: {}개 종목", len(daily_dfs))
+
+    # ── Phase 3: 패턴 탐지 (Ctrl+C 시 완료분 부분 저장) ─────────────
+    logger.info("Phase 3 진입: 패턴 탐지 ({}종목, workers={})", len(daily_dfs), FETCH_MAX_WORKERS)
+    results: list = []
+    interrupted = False
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task2 = progress.add_task(
+            "[bold]패턴 탐지 중...[/bold]",
+            total=len(daily_dfs),
+        )
+        try:
+            with cf.ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+                future_map = {
+                    executor.submit(
+                        analyze_ticker,
+                        t,
+                        market_map.get(t, "US"),
+                        daily_dfs[t],
+                        fundamentals_map.get(t) if fundamentals_map else None,
+                    ): t
+                    for t in daily_dfs
+                }
+                for future in cf.as_completed(future_map):
+                    t = future_map[future]
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        logger.error("{} 처리 실패: {}", t, exc)
+                    finally:
+                        progress.advance(task2)
+        except KeyboardInterrupt:
+            interrupted = True
+            console.print(
+                f"\n[yellow]Ctrl+C 감지 — 완료된 {len(results)}건 저장 후 종료[/yellow]"
+            )
+            logger.warning("사용자 중단: {}개 종목 완료, 부분 저장 시작", len(results))
+
+    phase_label = f"(부분: {len(results)}/{len(daily_dfs)})" if interrupted else f"({len(daily_dfs)}종목)"
+    console.print(f"[dim]✓ Phase 3: 패턴 탐지 {phase_label}[/dim]")
+    logger.info("Phase 3 완료: {}개 결과", len(results))
+
+    # ── 후처리 ───────────────────────────────────────────────────────
+    if no_volume_filter:
+        for r in results:
+            r.passed_volume = True
+
+    if patterns:
+        for r in results:
+            pairs = [
+                (pr, sc)
+                for pr, sc in zip(r.pattern_results, r.confidence_scores)
+                if pr.pattern_name in patterns
+            ]
+            if pairs:
+                r.pattern_results, r.confidence_scores = map(list, zip(*pairs))
+            else:
+                r.pattern_results = []
+                r.confidence_scores = []
+
+    # ── Phase 4: DB 저장 ─────────────────────────────────────────────
+    logger.info("Phase 4 진입: DB 저장")
+    try:
+        with get_session() as session:
+            saved_count = save_scan_results(results, session)
+    except Exception as exc:
+        logger.error("DB 저장 실패: {}", exc)
+        console.print(f"[red]DB 저장 실패: {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[dim]✓ Phase 4: DB 저장 ({saved_count}건)[/dim]")
+    logger.info("Phase 4 완료: {}건 저장", saved_count)
+
+    # ── 상위 결과 조회 ────────────────────────────────────────────────
+    scan_date = date.today()
+    min_score_arg = min_confidence if min_confidence > 0 else None
+    with get_session() as session:
+        top_results = get_scan_results(
+            scan_date=scan_date,
+            session=session,
+            min_score=min_score_arg,
+        )
+
+    pattern_dist: dict[str, int] = {}
+    for r in results:
+        for pr in r.pattern_results:
+            pattern_dist[pr.pattern_name] = pattern_dist.get(pr.pattern_name, 0) + 1
+
+    duration = time.monotonic() - t_start
+    total_patterns = sum(len(r.pattern_results) for r in results)
+    logger.info("scan 완료 | 패턴={}건 저장={}건 소요={:.1f}초", total_patterns, saved_count, duration)
+
+    # ── 요약 패널 ─────────────────────────────────────────────────────
+    panel_title = "[bold yellow]⚠ 스캔 완료 (부분)[/bold yellow]" if interrupted else "[bold green]스캔 완료[/bold green]"
+    panel_border = "yellow" if interrupted else "green"
+
+    summary_grid = Table.grid(padding=(0, 2))
+    summary_grid.add_column(style="bold cyan", min_width=16)
+    summary_grid.add_column(justify="right", style="bold")
+    summary_grid.add_row("스캔 기준일", str(scan_date))
+    summary_grid.add_row("스캔 시장", market_upper)
+    summary_grid.add_row("스캔 종목 수", f"{len(results)}/{len(daily_dfs)}" if interrupted else str(len(daily_dfs)))
+    summary_grid.add_row("탐지 패턴 수", str(total_patterns))
+    summary_grid.add_row("DB 저장 건수", str(saved_count))
+    summary_grid.add_row("소요 시간", f"{duration:.1f}초")
+
+    if pattern_dist:
+        summary_grid.add_row("", "")
+        for pname, cnt in sorted(pattern_dist.items(), key=lambda x: -x[1]):
+            display, color = PATTERN_STYLES.get(pname, (pname, "white"))
+            summary_grid.add_row(f"[{color}]{display}[/{color}]", str(cnt))
+
+    console.print(Panel(summary_grid, title=panel_title, border_style=panel_border))
+
+    if top_results:
+        _print_results_table(top_results[:10], title="TOP 10 — 신뢰도 순위", top_n=10)
+
+    if interrupted:
+        raise typer.Exit(code=0)
+
+
+# ---------------------------------------------------------------------------
+# results 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("results")
+def results(
+    date_str: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="조회 날짜 (YYYY-MM-DD 또는 today, 기본: 오늘)",
+    ),
+    pattern: Optional[str] = typer.Option(
+        None, "--pattern", "-p",
+        help="패턴 필터: double_bottom | golden_cross | box_breakout | pullback",
+    ),
+    market: Optional[str] = typer.Option(
+        None, "--market", "-m", help="시장 필터: kr | us",
+    ),
+    top: int = typer.Option(20, "--top", "-n", help="상위 N개 출력"),
+    min_confidence: float = typer.Option(
+        0.0, "--min-confidence", help="최소 신뢰도 점수",
+    ),
+    passed_only: bool = typer.Option(
+        False, "--passed-only", help="거래량·재무 필터 통과 종목만 표시",
+    ),
+) -> None:
+    """스캔 결과를 조회해 테이블로 출력한다.
+
+    Args:
+        date_str       : 조회 날짜 (기본: 오늘).
+        pattern        : 패턴 이름 필터.
+        market         : 시장 코드 필터.
+        top            : 출력할 최대 행 수.
+        min_confidence : 최소 신뢰도 점수.
+        passed_only    : 필터 통과 종목만 출력.
+    """
+    from sqlalchemy import select
+
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.db.models import Universe
+    from scanner.db.repository import get_scan_results
+    from scanner.db.session import get_session
+
+    setup_logger()
+    init_database()
+
+    target_date = _parse_date(date_str)
+
+    market_tickers: list[str] | None = None
+    if market:
+        with get_session() as session:
+            market_tickers = list(
+                session.execute(
+                    select(Universe.ticker)
+                    .where(Universe.market == market.upper())
+                    .where(Universe.is_active.is_(True))
+                ).scalars().all()
+            )
+        if not market_tickers:
+            console.print(
+                f"[yellow]{market.upper()} 시장 종목이 없습니다. "
+                f"'scanner update-universe --market {market.lower()}' 를 먼저 실행하세요.[/yellow]"
+            )
+            raise typer.Exit(code=0)
+
+    with get_session() as session:
+        rows = get_scan_results(
+            scan_date=target_date,
+            session=session,
+            market_tickers=market_tickers,
+            min_score=min_confidence if min_confidence > 0 else None,
+            passed_filters_only=passed_only,
+        )
+
+    if pattern:
+        rows = [r for r in rows if r.pattern_name == pattern]
+
+    if not rows:
+        console.print(
+            f"[yellow]{target_date} 날짜에 조건에 맞는 스캔 결과가 없습니다.[/yellow]"
+        )
+        raise typer.Exit(code=0)
+
+    _print_results_table(rows[:top], title=f"스캔 결과 — {target_date}", top_n=top)
+    console.print(f"[dim]총 {len(rows)}건 중 {min(top, len(rows))}건 표시[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# show 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("show")
+def show(
+    ticker: str = typer.Argument(..., help="종목 코드 (예: 005930, AAPL)"),
+    date_str: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="조회 날짜 (YYYY-MM-DD 또는 today, 기본: 오늘)",
+    ),
+) -> None:
+    """특정 종목의 스캔 결과 상세를 출력한다.
+
+    Args:
+        ticker  : 종목 코드.
+        date_str: 조회 날짜 (기본: 오늘).
+    """
+    from rich.panel import Panel
+    from rich.table import Table
+    from sqlalchemy import select
+
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.db.models import ScanResult
+    from scanner.db.session import get_session
+
+    setup_logger()
+    init_database()
+
+    target_date = _parse_date(date_str)
+    ticker_upper = ticker.upper()
+
+    with get_session() as session:
+        rows = session.execute(
+            select(ScanResult)
+            .where(ScanResult.scan_date == target_date)
+            .where(ScanResult.ticker == ticker_upper)
+            .order_by(ScanResult.confidence_score.desc())
+        ).scalars().all()
+
+    if not rows:
+        console.print(
+            f"[yellow]{ticker_upper} 종목의 {target_date} 스캔 결과가 없습니다.[/yellow]"
+        )
+        raise typer.Exit(code=0)
+
+    for row in rows:
+        display, color = PATTERN_STYLES.get(row.pattern_name, (row.pattern_name, "white"))
+
+        tbl = Table(show_header=False, padding=(0, 2))
+        tbl.add_column("항목", style="cyan", min_width=16)
+        tbl.add_column("값")
+
+        tbl.add_row("패턴", _pattern_markup(row.pattern_name))
+        tbl.add_row("신뢰도 점수", f"[bold]{row.confidence_score:.1f}[/bold] / 100")
+        tbl.add_row("진입가", f"{row.entry_price:,.2f}" if row.entry_price else "-")
+        tbl.add_row("손절가", f"{row.stop_loss:,.2f}" if row.stop_loss else "-")
+        tbl.add_row("목표가", f"{row.target_price:,.2f}" if row.target_price else "-")
+        tbl.add_row(
+            "손익비",
+            f"1 : {row.risk_reward_ratio:.2f}" if row.risk_reward_ratio else "-",
+        )
+        tbl.add_row("주봉 추세", row.trend_weekly or "-")
+        tbl.add_row(
+            "필터 통과",
+            "[green]✓ 통과[/green]" if row.passed_filters else "[red]✗ 미통과[/red]",
+        )
+
+        if row.pattern_details:
+            tbl.add_row("", "")
+            for k, v in row.pattern_details.items():
+                tbl.add_row(f"  {k}", str(v))
+
+        console.print(
+            Panel(
+                tbl,
+                title=f"[bold {color}]{ticker_upper} — {display}[/bold {color}]",
+                border_style=color,
+            )
+        )
 
 
 if __name__ == "__main__":
