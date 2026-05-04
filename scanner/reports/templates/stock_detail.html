@@ -194,6 +194,7 @@
   <div class="chart-toolbar">
     <div class="toolbar-section">
       <span style="font-weight:600;color:var(--text);font-size:12px">{{ ticker }}</span>
+      <span id="live-date" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted)">—</span>
       <div id="live-ohlcv">
         <span>O <span id="lv-open"  style="color:var(--text)">—</span></span>
         <span>H <span id="lv-high"  style="color:var(--success)">—</span></span>
@@ -212,28 +213,28 @@
     <div class="toolbar-section">
       <span style="color:var(--text-muted)">RSI(14)</span>
       <span id="live-rsi-val" style="color:var(--accent)">—</span>
+      <button id="rsi-toggle" style="
+        margin-left:6px; padding:2px 8px;
+        font-size:10px; font-weight:600; letter-spacing:.3px;
+        background:transparent; border:1px solid var(--border);
+        border-radius:4px; color:var(--text-muted); cursor:pointer;
+      ">끄기</button>
     </div>
   </div>
 
   {# 캔들스틱 + 이동평균 #}
-  <div class="chart-section-label">캔들 + 이동평균</div>
   <div id="chart-candle"></div>
 
   <hr class="chart-divider">
 
   {# 거래량 #}
-  <div class="chart-section-label">거래량</div>
   <div id="chart-volume"></div>
 
-  <hr class="chart-divider">
-
-  {# RSI #}
-  <div class="chart-section-label">RSI (14) &nbsp;
-    <span style="color:var(--danger);font-size:9px">── 70 과열</span>
-    &nbsp;
-    <span style="color:var(--success);font-size:9px">── 30 과매도</span>
+  {# RSI (toggleable) #}
+  <div id="rsi-panel">
+    <hr class="chart-divider">
+    <div id="chart-rsi"></div>
   </div>
-  <div id="chart-rsi"></div>
 
 </div>
 
@@ -258,7 +259,40 @@
 (function () {
   const OHLCV = {{ ohlcv_json | safe }};
 
-  /* 공통 옵션 */
+  /* param.time / dateFormatter 인자 → UTC Date 객체.
+     LightweightCharts는 string, number(UTC초), BusinessDay 객체, Date 객체를 혼용한다. */
+  function timeToDate(t) {
+    if (t instanceof Date) return t;
+    if (typeof t === 'number') return new Date(t * 1000);
+    if (typeof t === 'object' && t !== null && 'year' in t)
+      return new Date(Date.UTC(t.year, t.month - 1, t.day));
+    const p = String(t).split('-');
+    if (p.length === 3 && p[0].length === 4)
+      return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    return new Date(t);
+  }
+
+  /* param.time → "YYYY-MM-DD" 문자열 (candleMap / rsiMap 키와 동일) */
+  function timeToKey(t) {
+    if (t == null) return null;
+    const d = timeToDate(t);
+    return d.getUTCFullYear() + '-' +
+           String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getUTCDate()).padStart(2, '0');
+  }
+
+  /* 크로스헤어/시간축 날짜 표시 포맷: "월 2025-10-27" */
+  const KR_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+  function fmtDate(t) {
+    const d = timeToDate(t);
+    const dow = KR_DAYS[d.getUTCDay()];
+    const y   = d.getUTCFullYear();
+    const m   = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${dow} ${y}-${m}-${day}`;
+  }
+
+  /* 공통 차트 옵션 */
   const BASE = {
     layout: {
       background: { color: '#161b22' },
@@ -270,16 +304,17 @@
     },
     crosshair:       { mode: LightweightCharts.CrosshairMode.Normal },
     rightPriceScale: { borderColor: '#30363d' },
+    localization:    { dateFormatter: fmtDate },
     timeScale: {
       borderColor: '#30363d',
-      timeVisible: true,
-      secondsVisible: false,
+      timeVisible: false,   /* 일봉: 시간(00:00) 불필요 */
+      visible:     false,   /* 기본 숨김 — 가장 아래 차트만 표시 */
     },
     handleScroll: true,
     handleScale:  true,
   };
 
-  /* ── 캔들 차트 ─────────────────────────────────────────────── */
+  /* ── 캔들 차트 (시간축 숨김) ────────────────────────────────── */
   const elCandle = document.getElementById('chart-candle');
   elCandle.style.height = '340px';
   const chartCandle = LightweightCharts.createChart(elCandle, { ...BASE, height: 340 });
@@ -293,16 +328,15 @@
 
   /* 이동평균선 */
   [
-    { key: 'ma5',  color: '#00bcd4', width: 1 },
+    { key: 'ma5',  color: '#00bcd4', width: 1   },
     { key: 'ma20', color: '#ffca28', width: 1.5 },
     { key: 'ma60', color: '#e040fb', width: 1.5 },
   ].forEach(({ key, color, width }) => {
     if (OHLCV[key] && OHLCV[key].length) {
-      const s = chartCandle.addLineSeries({
+      chartCandle.addLineSeries({
         color, lineWidth: width,
         priceLineVisible: false, lastValueVisible: false,
-      });
-      s.setData(OHLCV[key]);
+      }).setData(OHLCV[key]);
     }
   });
 
@@ -326,31 +360,23 @@
   });
   {% endif %}
 
-  /* ── 거래량 차트 ───────────────────────────────────────────── */
+  /* ── 거래량 차트 (시간축 숨김) ─────────────────────────────── */
   const elVol = document.getElementById('chart-volume');
-  elVol.style.height = '100px';
-  const chartVol = LightweightCharts.createChart(elVol, {
-    ...BASE, height: 100,
-    timeScale: { ...BASE.timeScale, visible: false }, /* 캔들과 공유 → 숨김 */
-  });
+  elVol.style.height = '80px';
+  const chartVol = LightweightCharts.createChart(elVol, { ...BASE, height: 80 });
   const volSeries = chartVol.addHistogramSeries({
-    priceFormat: { type: 'volume' },
-    priceScaleId: '',
+    priceFormat: { type: 'volume' }, priceScaleId: '',
   });
   volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } });
   if (OHLCV.volume && OHLCV.volume.length) volSeries.setData(OHLCV.volume);
 
-  /* ── RSI 차트 ──────────────────────────────────────────────── */
+  /* ── RSI 차트 (시간축 표시 — 가장 아래) ────────────────────── */
   const elRsi = document.getElementById('chart-rsi');
-  elRsi.style.height = '120px';
+  elRsi.style.height = '100px';
   const chartRsi = LightweightCharts.createChart(elRsi, {
-    ...BASE, height: 120,
-    timeScale: { ...BASE.timeScale, visible: false }, /* 숨김 */
-    rightPriceScale: {
-      ...BASE.rightPriceScale,
-      autoScale: false,
-      minimum: 0, maximum: 100,
-    },
+    ...BASE, height: 100,
+    timeScale: { ...BASE.timeScale, visible: true },  /* 하단 시간축 */
+    rightPriceScale: { ...BASE.rightPriceScale, autoScale: false },
   });
   let rsiSeries = null;
   if (OHLCV.rsi && OHLCV.rsi.length) {
@@ -363,36 +389,51 @@
       }),
     });
     rsiSeries.setData(OHLCV.rsi);
-    rsiSeries.createPriceLine({
-      price: 70, color: '#f85149', lineWidth: 1, lineStyle: 3,
-      axisLabelVisible: true, title: '70',
-    });
-    rsiSeries.createPriceLine({
-      price: 30, color: '#3fb950', lineWidth: 1, lineStyle: 3,
-      axisLabelVisible: true, title: '30',
-    });
-    rsiSeries.createPriceLine({
-      price: 50, color: '#30363d', lineWidth: 1, lineStyle: 3,
-      axisLabelVisible: false,
-    });
+    rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '70' });
+    rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '30' });
+    rsiSeries.createPriceLine({ price: 50, color: '#30363d', lineWidth: 1, lineStyle: 3, axisLabelVisible: false });
   }
 
-  /* ── 시간축 동기화 ──────────────────────────────────────────── */
-  function syncRange(srcChart, dstCharts) {
-    srcChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      if (range === null) return;
-      dstCharts.forEach(c => c.timeScale().setVisibleLogicalRange(range));
+  /* ── RSI 토글 ──────────────────────────────────────────────── */
+  let rsiVisible = true;
+  document.getElementById('rsi-toggle').addEventListener('click', () => {
+    rsiVisible = !rsiVisible;
+    const panel = document.getElementById('rsi-panel');
+    const btn   = document.getElementById('rsi-toggle');
+    if (rsiVisible) {
+      panel.style.display = '';
+      chartVol.applyOptions({ timeScale: { ...BASE.timeScale, visible: false } });
+      chartRsi.applyOptions({ timeScale: { ...BASE.timeScale, visible: true  } });
+      btn.textContent = '끄기';
+      allThree.forEach(c => c.timeScale().fitContent());
+    } else {
+      panel.style.display = 'none';
+      chartVol.applyOptions({ timeScale: { ...BASE.timeScale, visible: true  } });
+      btn.textContent = '켜기';
+      [chartCandle, chartVol].forEach(c => c.timeScale().fitContent());
+    }
+  });
+
+  /* ── 시간축 동기화 (시간 기반 — 데이터 수 차이에도 정확히 정렬) */
+  let timeSyncing = false;
+  const allThree = [chartCandle, chartVol, chartRsi];
+  allThree.forEach(src => {
+    src.timeScale().subscribeVisibleTimeRangeChange(range => {
+      if (timeSyncing || range === null) return;
+      timeSyncing = true;
+      allThree.forEach(dst => {
+        if (dst === src) return;
+        try { dst.timeScale().setVisibleRange(range); } catch (_) {}
+      });
+      timeSyncing = false;
     });
-  }
-  syncRange(chartCandle, [chartVol, chartRsi]);
-  syncRange(chartVol,    [chartCandle, chartRsi]);
-  syncRange(chartRsi,    [chartCandle, chartVol]);
+  });
 
   /* ── 크로스헤어 동기화 ─────────────────────────────────────── */
-  const allCharts = [
+  const chartEntries = [
     { chart: chartCandle, series: candleSeries },
-    { chart: chartVol,    series: volSeries },
-    { chart: chartRsi,    series: rsiSeries },
+    { chart: chartVol,    series: volSeries    },
+    { chart: chartRsi,    series: rsiSeries    },
   ];
 
   function fmt(v, digits = 2) {
@@ -407,49 +448,44 @@
     return String(Math.round(v));
   }
 
-  /* OHLCV candle lookup map for fast access */
-  const candleMap = {};
+  /* "YYYY-MM-DD" 키 기반 룩업맵 */
+  const candleMap = {}, volMap = {}, rsiMap = {};
   (OHLCV.candles || []).forEach(c => { candleMap[c.time] = c; });
-  const volMap = {};
-  (OHLCV.volume || []).forEach(v => { volMap[v.time] = v; });
-  const rsiMap = {};
-  (OHLCV.rsi || []).forEach(r => { rsiMap[r.time] = r; });
+  (OHLCV.volume  || []).forEach(v => { volMap[v.time]    = v; });
+  (OHLCV.rsi     || []).forEach(r => { rsiMap[r.time]    = r; });
 
   let isSyncing = false;
-  allCharts.forEach(({ chart }) => {
+  chartEntries.forEach(({ chart }) => {
     chart.subscribeCrosshairMove(param => {
       if (isSyncing) return;
       isSyncing = true;
+
       const time = param.time;
 
       /* 다른 차트에 크로스헤어 위치 반영 */
-      allCharts.forEach(({ chart: c }) => {
-        if (c === chart) return;
-        if (time !== undefined) {
-          const coord = c.timeScale().timeToCoordinate(time);
-          if (coord !== null) {
-            c.setCrosshairPosition(NaN, coord, c.series);
-          }
-        } else {
-          c.clearCrosshairPosition();
-        }
+      chartEntries.forEach(({ chart: c, series: s }) => {
+        if (c === chart || !s) return;
+        if (time !== undefined) c.setCrosshairPosition(NaN, time, s);
+        else                    c.clearCrosshairPosition();
       });
 
-      /* 툴바 값 업데이트 */
-      if (time) {
-        const candle = candleMap[time];
+      /* 툴바 업데이트 */
+      if (time !== undefined) {
+        document.getElementById('live-date').textContent = fmtDate(time);
+        const key    = timeToKey(time);
+        const candle = candleMap[key];
         if (candle) {
-          document.getElementById('lv-open').textContent  = fmt(candle.open);
-          document.getElementById('lv-high').textContent  = fmt(candle.high);
-          document.getElementById('lv-low').textContent   = fmt(candle.low);
+          document.getElementById('lv-open').textContent = fmt(candle.open);
+          document.getElementById('lv-high').textContent = fmt(candle.high);
+          document.getElementById('lv-low').textContent  = fmt(candle.low);
           const closeEl = document.getElementById('lv-close');
-          closeEl.textContent = fmt(candle.close);
-          closeEl.style.color = candle.close >= candle.open ? 'var(--success)' : 'var(--danger)';
+          closeEl.textContent  = fmt(candle.close);
+          closeEl.style.color  = candle.close >= candle.open ? 'var(--success)' : 'var(--danger)';
         }
-        const vol = volMap[time];
+        const vol = volMap[key];
         if (vol) document.getElementById('lv-vol').textContent = fmtVol(vol.value);
 
-        const rsi = rsiMap[time];
+        const rsi   = rsiMap[key];
         const rsiEl = document.getElementById('live-rsi-val');
         if (rsi) {
           const rv = rsi.value;
@@ -457,6 +493,7 @@
           rsiEl.style.color = rv >= 70 ? 'var(--danger)' : (rv <= 30 ? 'var(--success)' : 'var(--accent)');
         } else {
           rsiEl.textContent = '—';
+          rsiEl.style.color = 'var(--accent)';
         }
       }
 
@@ -465,7 +502,7 @@
   });
 
   /* ── 초기 피팅 ─────────────────────────────────────────────── */
-  [chartCandle, chartVol, chartRsi].forEach(c => c.timeScale().fitContent());
+  allThree.forEach(c => c.timeScale().fitContent());
 
 })();
 </script>
