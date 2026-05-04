@@ -5,48 +5,88 @@
 {% block head_extra %}
 <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-  .chart-wrap {
+  /* ── 매매 시나리오 그리드 ─────────────────────────────────────── */
+  .trade-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 16px;
+  }
+  @media (max-width: 700px) { .trade-grid { grid-template-columns: repeat(2,1fr); } }
+
+  .trade-label {
+    font-size: 10px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .trade-value {
+    font-size: 18px; font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 3px;
+  }
+  .trade-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── 통합 차트 패널 ──────────────────────────────────────────── */
+  .chart-panel {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 12px 16px;
     margin-top: 16px;
+    overflow: hidden;
   }
-  .chart-label {
-    font-size: 11px; font-weight: 500;
+
+  /* 범례 + 실시간 값 툴바 */
+  .chart-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
     color: var(--text-muted);
-    margin-bottom: 8px;
-    display: flex; align-items: center; gap: 12px;
   }
-  .chart-label .legend-item {
-    display: flex; align-items: center; gap: 4px;
+  .chart-toolbar .toolbar-section {
+    display: flex; align-items: center; gap: 10px;
   }
-  .chart-label .legend-dot {
+  .toolbar-sep {
+    width: 1px; height: 14px;
+    background: var(--border); flex-shrink: 0;
+  }
+  .legend-dot {
+    display: inline-block;
     width: 10px; height: 3px; border-radius: 2px;
+    vertical-align: middle; margin-right: 3px;
   }
 
-  /* 매매 시나리오 그리드 */
-  .trade-grid {
-    display: grid;
-    grid-template-columns: repeat(3,1fr);
-    gap: 12px;
-    margin-top: 16px;
-  }
-  @media (max-width: 600px) { .trade-grid { grid-template-columns: 1fr 1fr; } }
-
-  .trade-item { }
-  .trade-label {
-    font-size: 11px; color: var(--text-muted);
-    text-transform: uppercase; letter-spacing: .4px;
-  }
-  .trade-value {
-    font-size: 20px; font-weight: 600;
+  /* 실시간 OHLCV 값 */
+  #live-ohlcv {
     font-family: 'JetBrains Mono', monospace;
-    margin-top: 4px;
+    font-size: 11px;
+    display: flex; gap: 10px; flex-wrap: wrap;
   }
-  .trade-sub { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+  #live-ohlcv span { white-space: nowrap; }
+  #live-rsi-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+  }
 
-  /* AI 코멘트 */
+  /* 차트 구역 레이블 */
+  .chart-section-label {
+    padding: 5px 14px 0;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .5px;
+    color: var(--text-muted);
+  }
+
+  /* 캔들 / 거래량 / RSI 구분선 */
+  .chart-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0;
+  }
+
+  /* ── AI 코멘트 패널 ──────────────────────────────────────────── */
   .ai-panel {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -81,6 +121,7 @@
 {% endblock %}
 
 {% block content %}
+
 {# ── 헤더 ────────────────────────────────────────────────────────── #}
 <div class="flex items-center justify-between" style="margin-bottom:16px">
   <div>
@@ -104,74 +145,96 @@
     <div class="text-xl font-bold font-mono" style="color:{{ score_color }}">
       {{ "%.1f"|format(confidence_score) }}점
     </div>
+    <div class="text-muted text-sm">
+      {% if trend_weekly == "uptrend" %}<span class="success">▲ 주봉 상승</span>
+      {% elif trend_weekly == "downtrend" %}<span class="danger">▼ 주봉 하락</span>
+      {% else %}<span class="text-muted">— 주봉 횡보</span>{% endif %}
+    </div>
   </div>
 </div>
 
-{# ── 매매 시나리오 카드 ──────────────────────────────────────────── #}
+{# ── 매매 시나리오 카드 4개 ──────────────────────────────────────── #}
 <div class="trade-grid">
   <div class="card trade-item">
     <div class="trade-label">진입가</div>
-    <div class="trade-value font-mono" style="color:var(--accent)">
+    <div class="trade-value" style="color:var(--accent)">
       {{ "%.2f"|format(entry_price) if entry_price else "—" }}
     </div>
   </div>
   <div class="card trade-item">
     <div class="trade-label">손절가</div>
-    <div class="trade-value font-mono danger">
+    <div class="trade-value danger">
       {{ "%.2f"|format(stop_loss) if stop_loss else "—" }}
     </div>
     {% if entry_price and stop_loss %}
-    <div class="trade-sub">
-      리스크 {{ "%.1f"|format((entry_price - stop_loss) / entry_price * 100) }}%
-    </div>
+    <div class="trade-sub">리스크 {{ "%.1f"|format((entry_price - stop_loss) / entry_price * 100) }}%</div>
     {% endif %}
   </div>
   <div class="card trade-item">
-    <div class="trade-label">
-      목표가{% if risk_reward_ratio %} (R:R 1:{{ "%.1f"|format(risk_reward_ratio) }}){% endif %}
-    </div>
-    <div class="trade-value font-mono success">
+    <div class="trade-label">목표가</div>
+    <div class="trade-value success">
       {{ "%.2f"|format(target_price) if target_price else "—" }}
     </div>
     {% if entry_price and target_price %}
-    <div class="trade-sub">
-      수익 {{ "%.1f"|format((target_price - entry_price) / entry_price * 100) }}%
+    <div class="trade-sub">수익 {{ "%.1f"|format((target_price - entry_price) / entry_price * 100) }}%</div>
+    {% endif %}
+  </div>
+  <div class="card trade-item">
+    <div class="trade-label">R:R 비율</div>
+    <div class="trade-value" style="color:var(--text)">
+      {% if risk_reward_ratio %}1 : {{ "%.2f"|format(risk_reward_ratio) }}{% else %}—{% endif %}
     </div>
-    {% endif %}
   </div>
 </div>
 
-{# ── 차트 1: 캔들스틱 + MA ──────────────────────────────────────── #}
-<div class="chart-wrap">
-  <div class="chart-label">
-    일봉 캔들 + 이동평균
-    <span class="legend-item"><span class="legend-dot" style="background:#00bcd4"></span>MA5</span>
-    <span class="legend-item"><span class="legend-dot" style="background:#ffca28"></span>MA20</span>
-    <span class="legend-item"><span class="legend-dot" style="background:#e040fb"></span>MA60</span>
-    {% if trend_weekly == "uptrend" %}
-      &nbsp;&nbsp;<span class="success">▲ 주봉 상승</span>
-    {% elif trend_weekly == "downtrend" %}
-      &nbsp;&nbsp;<span class="danger">▼ 주봉 하락</span>
-    {% else %}
-      &nbsp;&nbsp;<span class="text-muted">— 주봉 횡보</span>
-    {% endif %}
+{# ── 통합 차트 패널 ──────────────────────────────────────────────── #}
+<div class="chart-panel">
+
+  {# 툴바: 범례 + 마우스 오버 실시간 값 #}
+  <div class="chart-toolbar">
+    <div class="toolbar-section">
+      <span style="font-weight:600;color:var(--text);font-size:12px">{{ ticker }}</span>
+      <div id="live-ohlcv">
+        <span>O <span id="lv-open"  style="color:var(--text)">—</span></span>
+        <span>H <span id="lv-high"  style="color:var(--success)">—</span></span>
+        <span>L <span id="lv-low"   style="color:var(--danger)">—</span></span>
+        <span>C <span id="lv-close" style="color:var(--text)">—</span></span>
+        <span>V <span id="lv-vol"   style="color:var(--text-muted)">—</span></span>
+      </div>
+    </div>
+    <div class="toolbar-sep"></div>
+    <div class="toolbar-section">
+      <span><span class="legend-dot" style="background:#00bcd4"></span>MA5</span>
+      <span><span class="legend-dot" style="background:#ffca28"></span>MA20</span>
+      <span><span class="legend-dot" style="background:#e040fb"></span>MA60</span>
+    </div>
+    <div class="toolbar-sep"></div>
+    <div class="toolbar-section">
+      <span style="color:var(--text-muted)">RSI(14)</span>
+      <span id="live-rsi-val" style="color:var(--accent)">—</span>
+    </div>
   </div>
+
+  {# 캔들스틱 + 이동평균 #}
+  <div class="chart-section-label">캔들 + 이동평균</div>
   <div id="chart-candle"></div>
-</div>
 
-{# ── 차트 2: 거래량 ─────────────────────────────────────────────── #}
-<div class="chart-wrap">
-  <div class="chart-label">거래량</div>
+  <hr class="chart-divider">
+
+  {# 거래량 #}
+  <div class="chart-section-label">거래량</div>
   <div id="chart-volume"></div>
-</div>
 
-{# ── 차트 3: RSI ────────────────────────────────────────────────── #}
-<div class="chart-wrap">
-  <div class="chart-label">RSI (14)&nbsp;&nbsp;
-    <span class="legend-item"><span style="font-size:10px;color:var(--danger)">── 70 과열</span></span>
-    <span class="legend-item"><span style="font-size:10px;color:var(--success)">── 30 과매도</span></span>
+  <hr class="chart-divider">
+
+  {# RSI #}
+  <div class="chart-section-label">RSI (14) &nbsp;
+    <span style="color:var(--danger);font-size:9px">── 70 과열</span>
+    &nbsp;
+    <span style="color:var(--success);font-size:9px">── 30 과매도</span>
   </div>
   <div id="chart-rsi"></div>
+
 </div>
 
 {# ── AI 코멘트 패널 ─────────────────────────────────────────────── #}
@@ -185,17 +248,18 @@
   {% endfor %}
   {% if confidence_score < 75 %}
   <div class="risk-warn">
-    ⚠ 신호 강도가 보통입니다 ({{ "%.1f"|format(confidence_score) }}점).
-    추가 확인을 권장합니다.
+    ⚠ 신호 강도가 보통입니다 ({{ "%.1f"|format(confidence_score) }}점). 추가 확인을 권장합니다.
   </div>
   {% endif %}
 </div>
 
-{# ── TradingView 차트 초기화 ────────────────────────────────────── #}
+{# ── 차트 초기화 스크립트 ───────────────────────────────────────── #}
 <script>
+(function () {
   const OHLCV = {{ ohlcv_json | safe }};
 
-  const BASE_OPTS = {
+  /* 공통 옵션 */
+  const BASE = {
     layout: {
       background: { color: '#161b22' },
       textColor:  '#8b949e',
@@ -204,94 +268,205 @@
       vertLines: { color: '#21262d' },
       horzLines: { color: '#21262d' },
     },
-    crosshair:       { mode: 1 },
+    crosshair:       { mode: LightweightCharts.CrosshairMode.Normal },
     rightPriceScale: { borderColor: '#30363d' },
-    timeScale:       { borderColor: '#30363d', timeVisible: true },
+    timeScale: {
+      borderColor: '#30363d',
+      timeVisible: true,
+      secondsVisible: false,
+    },
+    handleScroll: true,
+    handleScale:  true,
   };
 
-  /* ── 차트 1: 캔들 + MA ─────────────────────────────────────── */
-  (function () {
-    const el = document.getElementById('chart-candle');
-    el.style.height = '320px';
-    const chart = LightweightCharts.createChart(el, { ...BASE_OPTS, height: 320 });
+  /* ── 캔들 차트 ─────────────────────────────────────────────── */
+  const elCandle = document.getElementById('chart-candle');
+  elCandle.style.height = '340px';
+  const chartCandle = LightweightCharts.createChart(elCandle, { ...BASE, height: 340 });
 
-    const candles = chart.addCandlestickSeries({
-      upColor:        '#3fb950', downColor:        '#f85149',
-      borderUpColor:  '#3fb950', borderDownColor:  '#f85149',
-      wickUpColor:    '#3fb950', wickDownColor:    '#f85149',
-    });
-    if (OHLCV.candles && OHLCV.candles.length) candles.setData(OHLCV.candles);
+  const candleSeries = chartCandle.addCandlestickSeries({
+    upColor:        '#3fb950', downColor:        '#f85149',
+    borderUpColor:  '#3fb950', borderDownColor:  '#f85149',
+    wickUpColor:    '#3fb950', wickDownColor:    '#f85149',
+  });
+  if (OHLCV.candles && OHLCV.candles.length) candleSeries.setData(OHLCV.candles);
 
-    /* 이동평균선 */
-    const maLines = [
-      { key: 'ma5',  color: '#00bcd4', width: 1.5 },
-      { key: 'ma20', color: '#ffca28', width: 1.5 },
-      { key: 'ma60', color: '#e040fb', width: 1.5 },
-    ];
-    maLines.forEach(({ key, color, width }) => {
-      if (OHLCV[key] && OHLCV[key].length) {
-        const s = chart.addLineSeries({
-          color, lineWidth: width, priceLineVisible: false, lastValueVisible: false,
-        });
-        s.setData(OHLCV[key]);
-      }
-    });
-
-    /* 진입/손절/목표 라인 */
-    {% if entry_price %}
-    candles.createPriceLine({
-      price: {{ entry_price }}, color: '#00bcd4', lineWidth: 1, lineStyle: 2,
-      axisLabelVisible: true, title: '진입',
-    });
-    {% endif %}
-    {% if stop_loss %}
-    candles.createPriceLine({
-      price: {{ stop_loss }}, color: '#f85149', lineWidth: 1, lineStyle: 2,
-      axisLabelVisible: true, title: '손절',
-    });
-    {% endif %}
-    {% if target_price %}
-    candles.createPriceLine({
-      price: {{ target_price }}, color: '#3fb950', lineWidth: 1, lineStyle: 2,
-      axisLabelVisible: true, title: '목표',
-    });
-    {% endif %}
-
-    chart.timeScale().fitContent();
-  })();
-
-  /* ── 차트 2: 거래량 ────────────────────────────────────────── */
-  (function () {
-    const el = document.getElementById('chart-volume');
-    el.style.height = '120px';
-    const chart = LightweightCharts.createChart(el, { ...BASE_OPTS, height: 120 });
-    const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
-    vol.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } });
-    if (OHLCV.volume && OHLCV.volume.length) vol.setData(OHLCV.volume);
-    chart.timeScale().fitContent();
-  })();
-
-  /* ── 차트 3: RSI ───────────────────────────────────────────── */
-  (function () {
-    const el = document.getElementById('chart-rsi');
-    el.style.height = '150px';
-    const chart = LightweightCharts.createChart(el, { ...BASE_OPTS, height: 150 });
-    if (OHLCV.rsi && OHLCV.rsi.length) {
-      const rsiSeries = chart.addLineSeries({
-        color: '#00bcd4', lineWidth: 1.5,
-        priceLineVisible: false, lastValueVisible: true,
+  /* 이동평균선 */
+  [
+    { key: 'ma5',  color: '#00bcd4', width: 1 },
+    { key: 'ma20', color: '#ffca28', width: 1.5 },
+    { key: 'ma60', color: '#e040fb', width: 1.5 },
+  ].forEach(({ key, color, width }) => {
+    if (OHLCV[key] && OHLCV[key].length) {
+      const s = chartCandle.addLineSeries({
+        color, lineWidth: width,
+        priceLineVisible: false, lastValueVisible: false,
       });
-      rsiSeries.setData(OHLCV.rsi);
-      rsiSeries.createPriceLine({
-        price: 70, color: '#f85149', lineWidth: 1, lineStyle: 1,
-        axisLabelVisible: true, title: '70',
-      });
-      rsiSeries.createPriceLine({
-        price: 30, color: '#3fb950', lineWidth: 1, lineStyle: 1,
-        axisLabelVisible: true, title: '30',
-      });
+      s.setData(OHLCV[key]);
     }
-    chart.timeScale().fitContent();
-  })();
+  });
+
+  /* 진입/손절/목표 수평선 */
+  {% if entry_price %}
+  candleSeries.createPriceLine({
+    price: {{ entry_price }}, color: '#00bcd4', lineWidth: 1, lineStyle: 2,
+    axisLabelVisible: true, title: '진입',
+  });
+  {% endif %}
+  {% if stop_loss %}
+  candleSeries.createPriceLine({
+    price: {{ stop_loss }}, color: '#f85149', lineWidth: 1, lineStyle: 2,
+    axisLabelVisible: true, title: '손절',
+  });
+  {% endif %}
+  {% if target_price %}
+  candleSeries.createPriceLine({
+    price: {{ target_price }}, color: '#3fb950', lineWidth: 1, lineStyle: 2,
+    axisLabelVisible: true, title: '목표',
+  });
+  {% endif %}
+
+  /* ── 거래량 차트 ───────────────────────────────────────────── */
+  const elVol = document.getElementById('chart-volume');
+  elVol.style.height = '100px';
+  const chartVol = LightweightCharts.createChart(elVol, {
+    ...BASE, height: 100,
+    timeScale: { ...BASE.timeScale, visible: false }, /* 캔들과 공유 → 숨김 */
+  });
+  const volSeries = chartVol.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: '',
+  });
+  volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } });
+  if (OHLCV.volume && OHLCV.volume.length) volSeries.setData(OHLCV.volume);
+
+  /* ── RSI 차트 ──────────────────────────────────────────────── */
+  const elRsi = document.getElementById('chart-rsi');
+  elRsi.style.height = '120px';
+  const chartRsi = LightweightCharts.createChart(elRsi, {
+    ...BASE, height: 120,
+    timeScale: { ...BASE.timeScale, visible: false }, /* 숨김 */
+    rightPriceScale: {
+      ...BASE.rightPriceScale,
+      autoScale: false,
+      minimum: 0, maximum: 100,
+    },
+  });
+  let rsiSeries = null;
+  if (OHLCV.rsi && OHLCV.rsi.length) {
+    rsiSeries = chartRsi.addLineSeries({
+      color: '#00bcd4', lineWidth: 1.5,
+      priceLineVisible: false, lastValueVisible: true,
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: 0, maxValue: 100 },
+        margins: { above: 0, below: 0 },
+      }),
+    });
+    rsiSeries.setData(OHLCV.rsi);
+    rsiSeries.createPriceLine({
+      price: 70, color: '#f85149', lineWidth: 1, lineStyle: 3,
+      axisLabelVisible: true, title: '70',
+    });
+    rsiSeries.createPriceLine({
+      price: 30, color: '#3fb950', lineWidth: 1, lineStyle: 3,
+      axisLabelVisible: true, title: '30',
+    });
+    rsiSeries.createPriceLine({
+      price: 50, color: '#30363d', lineWidth: 1, lineStyle: 3,
+      axisLabelVisible: false,
+    });
+  }
+
+  /* ── 시간축 동기화 ──────────────────────────────────────────── */
+  function syncRange(srcChart, dstCharts) {
+    srcChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (range === null) return;
+      dstCharts.forEach(c => c.timeScale().setVisibleLogicalRange(range));
+    });
+  }
+  syncRange(chartCandle, [chartVol, chartRsi]);
+  syncRange(chartVol,    [chartCandle, chartRsi]);
+  syncRange(chartRsi,    [chartCandle, chartVol]);
+
+  /* ── 크로스헤어 동기화 ─────────────────────────────────────── */
+  const allCharts = [
+    { chart: chartCandle, series: candleSeries },
+    { chart: chartVol,    series: volSeries },
+    { chart: chartRsi,    series: rsiSeries },
+  ];
+
+  function fmt(v, digits = 2) {
+    if (v == null || isNaN(v)) return '—';
+    return Number(v).toFixed(digits);
+  }
+  function fmtVol(v) {
+    if (v == null || isNaN(v)) return '—';
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    return String(Math.round(v));
+  }
+
+  /* OHLCV candle lookup map for fast access */
+  const candleMap = {};
+  (OHLCV.candles || []).forEach(c => { candleMap[c.time] = c; });
+  const volMap = {};
+  (OHLCV.volume || []).forEach(v => { volMap[v.time] = v; });
+  const rsiMap = {};
+  (OHLCV.rsi || []).forEach(r => { rsiMap[r.time] = r; });
+
+  let isSyncing = false;
+  allCharts.forEach(({ chart }) => {
+    chart.subscribeCrosshairMove(param => {
+      if (isSyncing) return;
+      isSyncing = true;
+      const time = param.time;
+
+      /* 다른 차트에 크로스헤어 위치 반영 */
+      allCharts.forEach(({ chart: c }) => {
+        if (c === chart) return;
+        if (time !== undefined) {
+          const coord = c.timeScale().timeToCoordinate(time);
+          if (coord !== null) {
+            c.setCrosshairPosition(NaN, coord, c.series);
+          }
+        } else {
+          c.clearCrosshairPosition();
+        }
+      });
+
+      /* 툴바 값 업데이트 */
+      if (time) {
+        const candle = candleMap[time];
+        if (candle) {
+          document.getElementById('lv-open').textContent  = fmt(candle.open);
+          document.getElementById('lv-high').textContent  = fmt(candle.high);
+          document.getElementById('lv-low').textContent   = fmt(candle.low);
+          const closeEl = document.getElementById('lv-close');
+          closeEl.textContent = fmt(candle.close);
+          closeEl.style.color = candle.close >= candle.open ? 'var(--success)' : 'var(--danger)';
+        }
+        const vol = volMap[time];
+        if (vol) document.getElementById('lv-vol').textContent = fmtVol(vol.value);
+
+        const rsi = rsiMap[time];
+        const rsiEl = document.getElementById('live-rsi-val');
+        if (rsi) {
+          const rv = rsi.value;
+          rsiEl.textContent = fmt(rv, 1);
+          rsiEl.style.color = rv >= 70 ? 'var(--danger)' : (rv <= 30 ? 'var(--success)' : 'var(--accent)');
+        } else {
+          rsiEl.textContent = '—';
+        }
+      }
+
+      isSyncing = false;
+    });
+  });
+
+  /* ── 초기 피팅 ─────────────────────────────────────────────── */
+  [chartCandle, chartVol, chartRsi].forEach(c => c.timeScale().fitContent());
+
+})();
 </script>
 {% endblock %}

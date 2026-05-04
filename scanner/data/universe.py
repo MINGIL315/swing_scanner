@@ -161,8 +161,14 @@ def update_sp500() -> int:
     logger.info("S&P500 구성종목 스크래핑 시작 ({})", _SP500_WIKI_URL)
 
     try:
-        tables: list[pd.DataFrame] = pd.read_html(
+        resp = requests.get(
             _SP500_WIKI_URL,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SwingScanner/1.0)"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        tables: list[pd.DataFrame] = pd.read_html(
+            resp.text,
             attrs={"id": "constituents"},
         )
         df = tables[0]
