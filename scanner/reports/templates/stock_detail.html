@@ -27,11 +27,31 @@
 
   /* ── 통합 차트 패널 ──────────────────────────────────────────── */
   .chart-panel {
+    position: relative;            /* 크로스헤어 날짜 오버레이 기준 */
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
     margin-top: 16px;
     overflow: hidden;
+  }
+
+  /* 커스텀 크로스헤어 시간축 레이블 (LWC 내장 레이블은 숨김) */
+  .crosshair-date-tag {
+    position: absolute;
+    transform: translateX(-50%);
+    background: #2a2e39;
+    color: #d1d4dc;
+    padding: 2px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 5;
+    display: none;
+    border-radius: 2px;
+    border: 1px solid #2a2e39;
+    line-height: 16px;
   }
 
   /* 범례 + 실시간 값 툴바 */
@@ -236,6 +256,9 @@
     <div id="chart-rsi"></div>
   </div>
 
+  {# 크로스헤어 날짜 오버레이 (LWC 기본 레이블 대체) #}
+  <div id="crosshair-date-tag" class="crosshair-date-tag">—</div>
+
 </div>
 
 {# ── AI 코멘트 패널 ─────────────────────────────────────────────── #}
@@ -292,6 +315,16 @@
     return `${dow} ${y}-${m}-${day}`;
   }
 
+  /* "YYYY-MM-DD" 배열 → UTCTimestamp(초) 배열.
+     LightweightCharts v4는 BusinessDay(문자열) 모드에서 dateFormatter를
+     크로스헤어 레이블에 적용하지 않는다. UTCTimestamp(숫자) 모드로 강제해야 한다. */
+  function toTs(arr) {
+    return (arr || []).map(d => {
+      const [y, m, day] = String(d.time).split('-');
+      return { ...d, time: Date.UTC(+y, +m - 1, +day) / 1000 };
+    });
+  }
+
   /* 공통 차트 옵션 */
   const BASE = {
     layout: {
@@ -302,7 +335,10 @@
       vertLines: { color: '#21262d' },
       horzLines: { color: '#21262d' },
     },
-    crosshair:       { mode: LightweightCharts.CrosshairMode.Normal },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { labelVisible: false },   /* 기본 시간 레이블 숨김 → 커스텀 오버레이 사용 */
+    },
     rightPriceScale: { borderColor: '#30363d' },
     localization:    { dateFormatter: fmtDate },
     timeScale: {
@@ -324,7 +360,7 @@
     borderUpColor:  '#3fb950', borderDownColor:  '#f85149',
     wickUpColor:    '#3fb950', wickDownColor:    '#f85149',
   });
-  if (OHLCV.candles && OHLCV.candles.length) candleSeries.setData(OHLCV.candles);
+  if (OHLCV.candles && OHLCV.candles.length) candleSeries.setData(toTs(OHLCV.candles));
 
   /* 이동평균선 */
   [
@@ -336,7 +372,7 @@
       chartCandle.addLineSeries({
         color, lineWidth: width,
         priceLineVisible: false, lastValueVisible: false,
-      }).setData(OHLCV[key]);
+      }).setData(toTs(OHLCV[key]));
     }
   });
 
@@ -368,7 +404,7 @@
     priceFormat: { type: 'volume' }, priceScaleId: '',
   });
   volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } });
-  if (OHLCV.volume && OHLCV.volume.length) volSeries.setData(OHLCV.volume);
+  if (OHLCV.volume && OHLCV.volume.length) volSeries.setData(toTs(OHLCV.volume));
 
   /* ── RSI 차트 (시간축 표시 — 가장 아래) ────────────────────── */
   const elRsi = document.getElementById('chart-rsi');
@@ -388,7 +424,7 @@
         margins: { above: 0, below: 0 },
       }),
     });
-    rsiSeries.setData(OHLCV.rsi);
+    rsiSeries.setData(toTs(OHLCV.rsi));
     rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '70' });
     rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '30' });
     rsiSeries.createPriceLine({ price: 50, color: '#30363d', lineWidth: 1, lineStyle: 3, axisLabelVisible: false });
@@ -454,6 +490,33 @@
   (OHLCV.volume  || []).forEach(v => { volMap[v.time]    = v; });
   (OHLCV.rsi     || []).forEach(r => { rsiMap[r.time]    = r; });
 
+  /* ── 커스텀 크로스헤어 시간축 레이블 ─────────────────────────── */
+  const dateTag    = document.getElementById('crosshair-date-tag');
+  const chartPanel = document.querySelector('.chart-panel');
+
+  function updateDateTag(time) {
+    if (time == null || time === undefined) {
+      dateTag.style.display = 'none';
+      return;
+    }
+    /* 시간축이 표시되는 가장 아래 차트 사용 (RSI on/off 대응) */
+    const bottomChart = rsiVisible ? chartRsi : chartVol;
+    const bottomEl    = rsiVisible ? elRsi    : elVol;
+    const x = bottomChart.timeScale().timeToCoordinate(time);
+    if (x == null) {
+      dateTag.style.display = 'none';
+      return;
+    }
+    const panelRect  = chartPanel.getBoundingClientRect();
+    const bottomRect = bottomEl.getBoundingClientRect();
+    const absoluteX  = (bottomRect.left - panelRect.left) + x;
+    const labelTop   = (bottomRect.bottom - panelRect.top) - 22;  /* 시간축 위치에 겹쳐 표시 */
+    dateTag.textContent  = fmtDate(time);
+    dateTag.style.left   = absoluteX + 'px';
+    dateTag.style.top    = labelTop  + 'px';
+    dateTag.style.display = 'block';
+  }
+
   let isSyncing = false;
   chartEntries.forEach(({ chart }) => {
     chart.subscribeCrosshairMove(param => {
@@ -468,6 +531,9 @@
         if (time !== undefined) c.setCrosshairPosition(NaN, time, s);
         else                    c.clearCrosshairPosition();
       });
+
+      /* 커스텀 시간 레이블 업데이트 */
+      updateDateTag(time);
 
       /* 툴바 업데이트 */
       if (time !== undefined) {
