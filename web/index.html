@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swing Scanner — 대시보드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --accent: #3b82f6; }
+    body { background:#0d1117; color:#e6edf3; font-family:'Segoe UI',system-ui,sans-serif; }
+    .card { background:#161b22; border:1px solid #30363d; border-radius:.75rem; }
+    .badge-up   { background:#1c3a2b; color:#3fb950; }
+    .badge-side { background:#2b2a1c; color:#d29922; }
+    .badge-down { background:#3a1c1c; color:#f85149; }
+    .score-high { color:#3fb950; }
+    .score-mid  { color:#d29922; }
+    .score-low  { color:#f85149; }
+    table { border-collapse:collapse; width:100%; }
+    th { background:#1c2128; position:sticky; top:0; z-index:1; }
+    th,td { padding:.5rem .75rem; text-align:left; border-bottom:1px solid #21262d; font-size:.85rem; }
+    tr:hover td { background:#1c2128; cursor:pointer; }
+    input,select { background:#1c2128; border:1px solid #30363d; color:#e6edf3; border-radius:.375rem; padding:.25rem .5rem; }
+    .spinner { border:3px solid #30363d; border-top:3px solid var(--accent); border-radius:50%; width:1.5rem; height:1.5rem; animation:spin .7s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<!-- 상단 헤더 -->
+<header class="border-b border-gray-700 px-6 py-3 flex items-center justify-between sticky top-0 z-10" style="background:#0d1117">
+  <div class="flex items-center gap-3">
+    <span class="text-xl font-bold text-blue-400">📈 Swing Scanner</span>
+    <span id="scan-date-badge" class="text-xs text-gray-400 bg-gray-800 px-2 py-1 rounded"></span>
+  </div>
+  <div class="flex items-center gap-2 text-sm">
+    <a href="/docs" target="_blank" class="text-gray-400 hover:text-blue-400">API 문서</a>
+    <span id="status-dot" class="w-2 h-2 rounded-full bg-gray-500" title="서버 상태"></span>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+  <!-- 요약 카드 4개 -->
+  <section id="summary-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="card p-4">
+      <p class="text-xs text-gray-400">전체 시그널</p>
+      <p id="stat-total" class="text-2xl font-bold mt-1">—</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs text-gray-400">필터 통과</p>
+      <p id="stat-passed" class="text-2xl font-bold mt-1 text-green-400">—</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs text-gray-400">KR 시그널</p>
+      <p id="stat-kr" class="text-2xl font-bold mt-1">—</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs text-gray-400">US 시그널</p>
+      <p id="stat-us" class="text-2xl font-bold mt-1">—</p>
+    </div>
+  </section>
+
+  <!-- 패턴 분포 -->
+  <section>
+    <h2 class="text-sm font-semibold text-gray-400 mb-3">패턴별 탐지 현황</h2>
+    <div id="pattern-cards" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+  </section>
+
+  <!-- 필터 + 종목 테이블 -->
+  <section class="card p-4">
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <h2 class="text-sm font-semibold">스캔 결과</h2>
+      <select id="filter-market" class="text-sm">
+        <option value="">전체 시장</option>
+        <option value="KR">한국 (KR)</option>
+        <option value="US">미국 (US)</option>
+      </select>
+      <select id="filter-pattern" class="text-sm">
+        <option value="">전체 패턴</option>
+        <option value="double_bottom">쌍바닥</option>
+        <option value="golden_cross">골든크로스</option>
+        <option value="box_breakout">박스 돌파</option>
+        <option value="pullback">눌림목</option>
+      </select>
+      <input id="filter-score" type="number" min="0" max="100" placeholder="최소 점수" class="text-sm w-24" />
+      <button onclick="loadResults()" class="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-white">조회</button>
+    </div>
+
+    <div id="table-spinner" class="hidden flex justify-center py-8"><div class="spinner"></div></div>
+    <div id="table-empty" class="hidden text-center text-gray-500 py-8">결과가 없습니다.</div>
+
+    <div class="overflow-x-auto">
+      <table id="results-table">
+        <thead>
+          <tr>
+            <th>종목</th><th>패턴</th><th>점수</th><th>진입가</th>
+            <th>손절가</th><th>목표가</th><th>R:R</th><th>주봉</th><th>필터</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+    <p id="result-count" class="text-xs text-gray-500 mt-2"></p>
+  </section>
+
+</main>
+
+<script>
+const API = '';  // 같은 origin (uvicorn)
+
+const PATTERN_LABEL = {
+  double_bottom:'쌍바닥', golden_cross:'골든크로스',
+  box_breakout:'박스 돌파', pullback:'눌림목'
+};
+const PATTERN_COLOR = {
+  double_bottom:'text-cyan-400', golden_cross:'text-yellow-400',
+  box_breakout:'text-purple-400', pullback:'text-green-400'
+};
+const TREND_CLASS = { uptrend:'badge-up', sideways:'badge-side', downtrend:'badge-down' };
+const TREND_LABEL = { uptrend:'상승', sideways:'횡보', downtrend:'하락' };
+
+function scoreClass(s) {
+  return s >= 80 ? 'score-high' : s >= 70 ? 'score-mid' : 'score-low';
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/api/health`);
+    const ok = r.ok;
+    document.getElementById('status-dot').className =
+      `w-2 h-2 rounded-full ${ok ? 'bg-green-400' : 'bg-red-400'}`;
+  } catch {
+    document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-red-400';
+  }
+}
+
+async function loadSummary() {
+  try {
+    const r = await fetch(`${API}/api/markets/summary`);
+    if (!r.ok) return;
+    const d = await r.json();
+
+    document.getElementById('scan-date-badge').textContent = d.scan_date;
+    document.getElementById('stat-total').textContent = d.total_signals;
+    document.getElementById('stat-passed').textContent = d.passed_filters;
+    document.getElementById('stat-kr').textContent = d.kr.signals;
+    document.getElementById('stat-us').textContent = d.us.signals;
+
+    const pc = document.getElementById('pattern-cards');
+    pc.innerHTML = '';
+    for (const [key, val] of Object.entries(d.pattern_distribution)) {
+      const col = PATTERN_COLOR[key] || 'text-gray-300';
+      pc.innerHTML += `
+        <div class="card p-3">
+          <p class="text-xs text-gray-400">${val.label}</p>
+          <p class="text-xl font-bold mt-1 ${col}">${val.count}</p>
+        </div>`;
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function loadResults() {
+  const market  = document.getElementById('filter-market').value;
+  const pattern = document.getElementById('filter-pattern').value;
+  const score   = document.getElementById('filter-score').value || '0';
+  const tbody   = document.getElementById('results-body');
+  const spinner = document.getElementById('table-spinner');
+  const empty   = document.getElementById('table-empty');
+
+  tbody.innerHTML = '';
+  spinner.classList.remove('hidden');
+  empty.classList.add('hidden');
+
+  try {
+    let url = `${API}/api/scan-results?top=200&min_score=${score}`;
+    if (market)  url += `&market=${market}`;
+    if (pattern) url += `&pattern=${pattern}`;
+
+    const r = await fetch(url);
+    const rows = await r.json();
+
+    spinner.classList.add('hidden');
+    if (!rows.length) { empty.classList.remove('hidden'); return; }
+
+    document.getElementById('result-count').textContent = `총 ${rows.length}건`;
+
+    rows.forEach(row => {
+      const trendCls = TREND_CLASS[row.trend_weekly] || 'badge-side';
+      const trendLbl = TREND_LABEL[row.trend_weekly] || row.trend_weekly || '-';
+      const pCol     = PATTERN_COLOR[row.pattern_name] || '';
+      const pLbl     = PATTERN_LABEL[row.pattern_name] || row.pattern_name;
+
+      const tr = document.createElement('tr');
+      tr.onclick = () => location.href = `stock.html?ticker=${row.ticker}`;
+      tr.innerHTML = `
+        <td class="font-mono font-semibold">${row.ticker}</td>
+        <td class="${pCol}">${pLbl}</td>
+        <td class="font-bold ${scoreClass(row.confidence_score)}">${row.confidence_score.toFixed(1)}</td>
+        <td>${row.entry_price ? row.entry_price.toLocaleString() : '-'}</td>
+        <td>${row.stop_loss ? row.stop_loss.toLocaleString() : '-'}</td>
+        <td>${row.target_price ? row.target_price.toLocaleString() : '-'}</td>
+        <td>${row.risk_reward_ratio ? '1:'+row.risk_reward_ratio.toFixed(1) : '-'}</td>
+        <td><span class="px-1.5 py-0.5 rounded text-xs ${trendCls}">${trendLbl}</span></td>
+        <td>${row.passed_filters ? '✓' : '✗'}</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch(e) {
+    spinner.classList.add('hidden');
+    console.error(e);
+  }
+}
+
+checkHealth();
+loadSummary();
+loadResults();
+</script>
+</body>
+</html>
