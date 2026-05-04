@@ -367,9 +367,33 @@ def scan(
 
     fetch → scan_universe → DB 저장 → 결과 요약 출력.
     """
-    from scanner.config import setup_logger
+    import time
+    from datetime import date, timedelta
+
+    from rich.panel import Panel
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+        TimeRemainingColumn,
+    )
+    from rich.table import Table
+
+    from scanner.config import FETCH_MAX_WORKERS, setup_logger
+    from scanner.data.universe import get_active_tickers
     from scanner.db.migrations import init_database
-    from scanner.pipeline import run_daily_pipeline
+    from scanner.db.repository import get_scan_results, save_scan_results
+    from scanner.db.session import get_session
+    from scanner.pipeline import (
+        _load_daily_dfs,
+        _load_fundamentals,
+        _load_market_map,
+        _maybe_update_universe,
+    )
+    from scanner.scanner import scan_universe
 
     setup_logger()
     init_database()
@@ -377,42 +401,146 @@ def scan(
     patterns = [p.strip() for p in pattern.split(",")] if pattern else None
     market_upper = market.upper()
 
-    console.print("[bold cyan]== Swing Scanner 스캔 시작 ==[/bold cyan]")
-    console.print(
-        f"  시장: [bold]{market_upper}[/bold]"
-        f"  |  최소 신뢰도: {min_confidence}"
-        f"  |  skip_fetch: {skip_fetch}"
-    )
+    console.print(Panel(
+        f"시장: [bold]{market_upper}[/bold]  |  "
+        f"최소 신뢰도: [bold]{min_confidence}[/bold]  |  "
+        f"fetch 건너뜀: [bold]{skip_fetch}[/bold]",
+        title="[bold cyan]Swing Scanner — 스캔 시작[/bold cyan]",
+        border_style="cyan",
+    ))
+
+    t_start = time.monotonic()
 
     try:
-        summary = run_daily_pipeline(
-            market=market_upper,
-            skip_fetch=skip_fetch,
-            min_confidence=min_confidence,
-            volume_filter=not no_volume_filter,
-            fundamental_filter=with_fundamental_filter,
-            patterns=patterns,
-        )
+        # ── Phase 1: 유니버스 확인 + 데이터 fetch ─────────────────────
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task1 = progress.add_task("[bold]유니버스 확인 중...[/bold]", total=None)
+            _maybe_update_universe(market_upper)
+            progress.update(task1, description="[green]✓ 유니버스 확인[/green]")
+
+            if not skip_fetch:
+                progress.update(task1, description="[bold]데이터 fetch 중...[/bold]")
+                from scanner.data.pipeline import run_data_pipeline
+                end_date = date.today()
+                start_date = end_date - timedelta(days=365)
+                run_data_pipeline(market=market_upper, start=start_date, end=end_date)
+                progress.update(task1, description="[green]✓ 데이터 fetch 완료[/green]")
+
+        console.print("[dim]✓ Phase 1: 유니버스 + 데이터 fetch[/dim]")
+
+        # ── Phase 2: 패턴 스캔 ────────────────────────────────────────
+        tickers = get_active_tickers(market_upper)
+        if not tickers:
+            console.print("[yellow]활성 종목이 없습니다. 유니버스 갱신 필요.[/yellow]")
+            raise typer.Exit(code=0)
+
+        daily_dfs = _load_daily_dfs(tickers)
+        market_map = _load_market_map(tickers)
+
+        fundamentals_map = None
+        if with_fundamental_filter:
+            fundamentals_map = _load_fundamentals(tickers)
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task2 = progress.add_task(
+                f"[bold]패턴 탐지 중...[/bold]  ({len(daily_dfs)}종목)",
+                total=len(daily_dfs),
+            )
+            results = scan_universe(
+                daily_dfs=daily_dfs,
+                market_map=market_map,
+                fundamentals_map=fundamentals_map,
+                max_workers=FETCH_MAX_WORKERS,
+            )
+            progress.update(task2, completed=len(daily_dfs))
+
+        console.print(f"[dim]✓ Phase 2: 패턴 탐지 ({len(daily_dfs)}종목)[/dim]")
+
+        # ── 후처리 ────────────────────────────────────────────────────
+        if no_volume_filter:
+            for r in results:
+                r.passed_volume = True
+
+        if patterns:
+            for r in results:
+                pairs = [
+                    (pr, sc)
+                    for pr, sc in zip(r.pattern_results, r.confidence_scores)
+                    if pr.pattern_name in patterns
+                ]
+                if pairs:
+                    r.pattern_results, r.confidence_scores = map(list, zip(*pairs))
+                else:
+                    r.pattern_results = []
+                    r.confidence_scores = []
+
+        # ── DB 저장 ────────────────────────────────────────────────────
+        with get_session() as session:
+            saved_count = save_scan_results(results, session)
+        console.print(f"[dim]✓ Phase 3: DB 저장 ({saved_count}건)[/dim]")
+
+        # ── 상위 결과 조회 ─────────────────────────────────────────────
+        scan_date = date.today()
+        min_score_arg = min_confidence if min_confidence > 0 else None
+        with get_session() as session:
+            top_results = get_scan_results(
+                scan_date=scan_date,
+                session=session,
+                min_score=min_score_arg,
+            )
+
+        pattern_dist: dict[str, int] = {}
+        for r in results:
+            for pr in r.pattern_results:
+                pattern_dist[pr.pattern_name] = pattern_dist.get(pr.pattern_name, 0) + 1
+
     except KeyboardInterrupt:
         console.print("\n[yellow]사용자 중단 요청. 종료합니다.[/yellow]")
         raise typer.Exit(code=0)
 
-    total_t = summary.get("total_tickers", 0)
-    total_p = summary.get("total_patterns", 0)
-    saved = summary.get("saved_count", 0)
-    duration = summary.get("duration_seconds", 0.0)
+    duration = time.monotonic() - t_start
+    total_patterns = sum(len(r.pattern_results) for r in results)
 
-    console.print(
-        f"\n[green]스캔 완료[/green]  |  "
-        f"종목: [bold]{total_t}[/bold]  |  "
-        f"패턴 탐지: [bold]{total_p}[/bold]건  |  "
-        f"DB 저장: [bold]{saved}[/bold]건  |  "
-        f"소요: {duration:.1f}초"
-    )
+    # ── 요약 패널 ─────────────────────────────────────────────────────
+    summary_grid = Table.grid(padding=(0, 2))
+    summary_grid.add_column(style="bold cyan", min_width=16)
+    summary_grid.add_column(justify="right", style="bold")
+    summary_grid.add_row("스캔 기준일", str(scan_date))
+    summary_grid.add_row("스캔 시장", market_upper)
+    summary_grid.add_row("스캔 종목 수", str(len(tickers)))
+    summary_grid.add_row("탐지 패턴 수", str(total_patterns))
+    summary_grid.add_row("DB 저장 건수", str(saved_count))
+    summary_grid.add_row("소요 시간", f"{duration:.1f}초")
 
-    top_results = summary.get("top_results", [])
+    if pattern_dist:
+        summary_grid.add_row("", "")
+        for pname, cnt in sorted(pattern_dist.items(), key=lambda x: -x[1]):
+            display, color = PATTERN_STYLES.get(pname, (pname, "white"))
+            summary_grid.add_row(f"[{color}]{display}[/{color}]", str(cnt))
+
+    console.print(Panel(
+        summary_grid,
+        title="[bold green]스캔 완료[/bold green]",
+        border_style="green",
+    ))
+
     if top_results:
-        _print_results_table(top_results, title="상위 결과 (TOP 10)", top_n=10)
+        _print_results_table(top_results[:10], title="TOP 10 — 신뢰도 순위", top_n=10)
 
 
 # ---------------------------------------------------------------------------
