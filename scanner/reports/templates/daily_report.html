@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Swing Scanner — {{ scan_date }} 일일 리포트{% endblock %}
+
+{% block content %}
+{# ── 헤더 영역 ──────────────────────────────────────────────────── #}
+<div class="flex items-center justify-between" style="margin-bottom:20px">
+  <div>
+    <h1 class="text-xl font-bold">일일 스캔 리포트</h1>
+    <p class="text-muted text-sm mt8">
+      {{ scan_date }}
+      &middot; 총 {{ total_tickers }}종목 스캔
+      &middot; 소요 {{ "%.1f"|format(duration_seconds) }}초
+    </p>
+  </div>
+  <div class="flex gap8">
+    <span class="badge badge-kr">KR {{ market_dist.get("KR", 0) }}</span>
+    <span class="badge badge-us">US {{ market_dist.get("US", 0) }}</span>
+  </div>
+</div>
+
+{# ── 패턴 요약 카드 4개 ──────────────────────────────────────────── #}
+{% set pattern_meta = [
+  ("double_bottom", "쌍바닥",     "double_bottom.html", "double-bottom"),
+  ("golden_cross",  "골든크로스",  "golden_cross.html",  "golden-cross"),
+  ("box_breakout",  "박스권 돌파", "box_breakout.html",  "box-breakout"),
+  ("pullback",      "눌림목",     "pullback.html",       "pullback"),
+] %}
+<div class="grid-4">
+  {% for key, label, href, css_var in pattern_meta %}
+  <a href="{{ href }}" style="text-decoration:none">
+    <div class="card" style="border-top:3px solid var(--{{ css_var }});cursor:pointer">
+      <div class="text-muted text-sm">{{ label }}</div>
+      <div class="text-xl font-bold font-mono mt8" style="color:var(--{{ css_var }})">
+        {{ pattern_dist.get(key, 0) }}
+      </div>
+      <div class="text-sm text-muted mt8">탐지 종목</div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+{# ── TOP 20 표 ───────────────────────────────────────────────────── #}
+<div class="mt24">
+  <div class="section-title">TOP 20 — 신뢰도 순위</div>
+  {% if top_results %}
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th>종목</th>
+          <th>패턴</th>
+          <th>신뢰도</th>
+          <th style="text-align:right">진입가</th>
+          <th style="text-align:right">손절가</th>
+          <th style="text-align:right">목표가</th>
+          <th style="text-align:right">R:R</th>
+          <th>주봉추세</th>
+          <th>시장</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in top_results %}
+        {% set score = row.confidence_score %}
+        {% set score_color = "var(--success)" if score >= 80 else ("var(--accent)" if score >= 70 else "var(--golden-cross)") %}
+        {% set pkey = row.pattern_name.replace("_", "-") %}
+        <tr>
+          <td class="text-muted font-mono">{{ loop.index }}</td>
+          <td>
+            <a href="stocks/{{ row.ticker }}.html" class="font-mono font-bold">
+              {{ row.ticker }}
+            </a>
+          </td>
+          <td>
+            <span class="badge badge-{{ pkey }}">
+              {{ pattern_labels.get(row.pattern_name, row.pattern_name) }}
+            </span>
+          </td>
+          <td>
+            <div class="score-bar">
+              <span class="font-mono font-bold nowrap" style="color:{{ score_color }}">
+                {{ "%.1f"|format(score) }}
+              </span>
+              <div class="bar-bg">
+                <div class="bar-fill" style="width:{{ score }}%;background:{{ score_color }}"></div>
+              </div>
+            </div>
+          </td>
+          <td class="font-mono nowrap" style="text-align:right">
+            {{ "%.2f"|format(row.entry_price) if row.entry_price else "—" }}
+          </td>
+          <td class="font-mono nowrap danger" style="text-align:right">
+            {{ "%.2f"|format(row.stop_loss) if row.stop_loss else "—" }}
+          </td>
+          <td class="font-mono nowrap success" style="text-align:right">
+            {{ "%.2f"|format(row.target_price) if row.target_price else "—" }}
+          </td>
+          <td class="font-mono nowrap" style="text-align:right">
+            {% if row.risk_reward_ratio %}1:{{ "%.1f"|format(row.risk_reward_ratio) }}{% else %}—{% endif %}
+          </td>
+          <td class="nowrap">
+            {% if row.trend_weekly == "uptrend" %}<span class="success">▲ 상승</span>
+            {% elif row.trend_weekly == "downtrend" %}<span class="danger">▼ 하락</span>
+            {% else %}<span class="text-muted">— 횡보</span>{% endif %}
+          </td>
+          <td>
+            <span class="badge badge-{{ (row.market or 'kr').lower() }}">
+              {{ (row.market or "KR").upper() }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card text-muted" style="text-align:center;padding:48px 20px">
+    신뢰도 70점 이상 종목이 없습니다.
+  </div>
+  {% endif %}
+</div>
+
+{# ── 시장별 분포 + 패턴별 상세 ──────────────────────────────────── #}
+<div class="grid-2 mt24">
+  <div>
+    <div class="section-title">시장별 탐지 건수</div>
+    <div class="card">
+      {% for market_code, color_class in [("KR","badge-kr"),("US","badge-us")] %}
+      <div class="flex justify-between items-center {% if not loop.first %}mt8{% endif %}">
+        <span><span class="badge {{ color_class }}">{{ market_code }}</span></span>
+        <span class="font-mono font-bold text-lg">{{ market_dist.get(market_code, 0) }}</span>
+      </div>
+      {% endfor %}
+      <div class="flex justify-between items-center mt8"
+           style="padding-top:8px;border-top:1px solid var(--border)">
+        <span class="font-bold">합계</span>
+        <span class="font-mono font-bold text-lg" style="color:var(--accent)">
+          {{ market_dist.get("KR", 0) + market_dist.get("US", 0) }}
+        </span>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div class="section-title">패턴별 상세</div>
+    <div class="card">
+      {% for key, label, _, css_var in pattern_meta %}
+      <div class="flex justify-between items-center {% if not loop.first %}mt8{% endif %}">
+        <span><span class="badge badge-{{ key.replace('_','-') }}">{{ label }}</span></span>
+        <span class="font-mono font-bold">{{ pattern_dist.get(key, 0) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

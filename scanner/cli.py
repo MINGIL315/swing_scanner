@@ -363,6 +363,9 @@ def scan(
     skip_fetch: bool = typer.Option(
         False, "--skip-fetch", help="데이터 fetch 생략 (DB 기존 데이터로 스캔)",
     ),
+    no_report: bool = typer.Option(
+        False, "--no-report", help="스캔 완료 후 HTML 리포트 생성 생략",
+    ),
 ) -> None:
     """전체 파이프라인을 실행한다.
 
@@ -581,6 +584,24 @@ def scan(
     if top_results:
         _print_results_table(top_results[:10], title="TOP 10 — 신뢰도 순위", top_n=10)
 
+    # ── HTML 리포트 자동 생성 ─────────────────────────────────────────
+    if not no_report and not interrupted:
+        try:
+            from scanner.reports.html_report import generate_daily_report
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True,
+            ) as progress:
+                progress.add_task("[bold]HTML 리포트 생성 중...[/bold]", total=None)
+                index_path = generate_daily_report(scan_date)
+            console.print(f"[green]✓ HTML 리포트 생성 완료[/green] → {index_path}")
+        except Exception as exc:
+            logger.warning("HTML 리포트 생성 실패 (무시): {}", exc)
+            console.print(f"[yellow]HTML 리포트 생성 실패 (무시): {exc}[/yellow]")
+
     if interrupted:
         raise typer.Exit(code=0)
 
@@ -753,6 +774,98 @@ def show(
                 border_style=color,
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# report 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("report")
+def report(
+    date_str: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="리포트 날짜 (YYYY-MM-DD 또는 today, 기본: 오늘)",
+    ),
+    open_browser: bool = typer.Option(
+        False, "--open", "-o", help="생성 완료 후 브라우저로 열기",
+    ),
+) -> None:
+    """HTML 리포트를 생성한다.
+
+    data/reports/YYYY-MM-DD/index.html 이하에 정적 파일을 저장한다.
+    """
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.reports.html_report import generate_daily_report
+
+    setup_logger()
+    init_database()
+
+    target_date = _parse_date(date_str)
+
+    console.print(f"[cyan]{target_date}[/cyan] HTML 리포트 생성 중...")
+    try:
+        index_path = generate_daily_report(target_date)
+    except Exception as exc:
+        console.print(f"[red]리포트 생성 실패: {exc}[/red]")
+        logger.exception("리포트 생성 실패")
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]✓ 리포트 생성 완료[/green] → {index_path}")
+
+    if open_browser:
+        import webbrowser
+        webbrowser.open(index_path.as_uri())
+
+
+# ---------------------------------------------------------------------------
+# export 명령어
+# ---------------------------------------------------------------------------
+
+@app.command("export")
+def export(
+    fmt: str = typer.Option(
+        "csv", "--format", "-f",
+        help="출력 형식: csv | xlsx",
+    ),
+    date_str: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="내보낼 날짜 (YYYY-MM-DD 또는 today, 기본: 오늘)",
+    ),
+    min_confidence: float = typer.Option(
+        0.0, "--min-confidence", help="최소 신뢰도 점수 (기본: 0 = 전체)",
+    ),
+) -> None:
+    """스캔 결과를 CSV 또는 Excel 로 내보낸다.
+
+    data/exports/YYYY-MM-DD.csv 또는 .xlsx 로 저장한다.
+    """
+    from scanner.config import setup_logger
+    from scanner.db.migrations import init_database
+    from scanner.reports.excel_export import export_to_csv, export_to_excel
+
+    setup_logger()
+    init_database()
+
+    target_date = _parse_date(date_str)
+    fmt_lower = fmt.lower()
+
+    if fmt_lower not in ("csv", "xlsx"):
+        console.print(f"[red]알 수 없는 형식: {fmt}  (csv 또는 xlsx 사용)[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[cyan]{target_date}[/cyan] {fmt_lower.upper()} 내보내기 중...")
+    try:
+        if fmt_lower == "csv":
+            out = export_to_csv(target_date, min_score=min_confidence)
+        else:
+            out = export_to_excel(target_date, min_score=min_confidence)
+    except Exception as exc:
+        console.print(f"[red]내보내기 실패: {exc}[/red]")
+        logger.exception("내보내기 실패")
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]✓ 내보내기 완료[/green] → {out}")
 
 
 if __name__ == "__main__":
