@@ -73,6 +73,9 @@ class DoubleBottomDetector(PatternDetector):
         trough_indices = trough_indices[-DOUBLE_BOTTOM_MAX_LOWS:]
         trough_prices = close[trough_indices]
 
+        first_low = float(trough_prices[0])
+        last_low = float(trough_prices[-1])
+
         # ── 저점 가격 ±3% 이내 ───────────────────────────────────
         low_min, low_max = trough_prices.min(), trough_prices.max()
         if low_min == 0:
@@ -120,6 +123,8 @@ class DoubleBottomDetector(PatternDetector):
             recent_close=float(window["close"].iloc[-1]),
             volume=window["volume"].values,
             last_trough_idx=last_trough_idx,
+            first_low=first_low,
+            last_low=last_low,
         )
 
         detected_at: date
@@ -136,6 +141,9 @@ class DoubleBottomDetector(PatternDetector):
             "neckline": round(neckline, 4),
             "trough_count": len(trough_indices),
             "last_trough_idx_in_window": last_trough_idx,
+            "first_low": round(first_low, 4),
+            "last_low": round(last_low, 4),
+            "last_first_low_ratio": round(last_low / first_low, 4) if first_low > 0 else 0.0,
         }
 
         return PatternResult(
@@ -221,6 +229,8 @@ class DoubleBottomDetector(PatternDetector):
         recent_close: float,
         volume: np.ndarray,
         last_trough_idx: int,
+        first_low: float,
+        last_low: float,
     ) -> float:
         """패턴 명확도 점수를 계산한다 (0~100).
 
@@ -229,8 +239,15 @@ class DoubleBottomDetector(PatternDetector):
         - 목선 높이 (30): 저점 대비 목선 상승폭이 클수록 고점수
         - 돌파 강도 (20): 현재 종가 > 목선 초과폭
         - 돌파 거래량 (20): 돌파 이후 평균 거래량 비율
+        - higher low 보너스 (+5): 두 번째 저점이 첫 저점보다 0.5% 이상 높으면 가산
         """
         score = 0.0
+
+        # 두 번째 저점이 첫 저점보다 0.5% 이상 높은 'higher low' 구조 가산
+        # → 매도세 약화 + 매수세 조기 진입 신호 (실전 매매에서 우대 대상)
+        # → 0.5% 미만 차이는 가격 변동 noise 로 간주
+        if last_low >= first_low * 1.005:
+            score += 5
 
         # 저점 균일성
         if avg_low > 0:
