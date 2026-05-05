@@ -28,13 +28,25 @@ _HIGH_GAP_MIN_PCT: float = 0.05
 def _resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
     """일봉 DataFrame을 주봉으로 리샘플링한다.
 
-    date 컬럼(혹은 인덱스)을 기준으로 월요일 시작 주 단위로 집계.
+    date 컬럼(혹은 인덱스)을 기준으로 월요일 시작 주 단위로 집계한다.
+
+    마지막 주가 _미완성_ (일봉 데이터가 아직 그 주 금요일까지 닿지 않음)이면
+    부분 캔들이 추세 판정·차트 표시에 섞이지 않도록 drop 한다.
+    이는 TradingView 의 ``Once Per Bar Close`` 알람과 동일한 의미로, 스크리너·
+    백테스트 모두에서 신호 안정성을 보장한다.
     """
     df_w = df.copy()
     if "date" in df_w.columns:
         df_w["date"] = pd.to_datetime(df_w["date"])
         df_w = df_w.set_index("date")
     df_w.index = pd.to_datetime(df_w.index)
+
+    if df_w.empty:
+        return pd.DataFrame(
+            columns=["week_start_date", "open", "high", "low", "close", "volume"]
+        )
+
+    last_daily = df_w.index.max()
 
     weekly = df_w.resample("W-MON", label="left", closed="left").agg(
         {
@@ -47,6 +59,14 @@ def _resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
     )
     weekly = weekly.dropna(subset=["close"])
     weekly = weekly.reset_index().rename(columns={"date": "week_start_date"})
+
+    # 마지막 주가 미완성이면 drop. 완성 기준: 일봉 마지막 날짜가 그 주 금요일(월+4) 이상.
+    if not weekly.empty:
+        last_week_start = pd.Timestamp(weekly.iloc[-1]["week_start_date"])
+        expected_week_end = last_week_start + pd.Timedelta(days=4)  # Friday
+        if last_daily < expected_week_end:
+            weekly = weekly.iloc[:-1].reset_index(drop=True)
+
     return weekly
 
 

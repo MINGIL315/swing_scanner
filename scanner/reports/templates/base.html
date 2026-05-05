@@ -46,7 +46,9 @@
     .logo {
       font-size: 17px; font-weight: 600; color: var(--accent);
       display: flex; align-items: center; gap: 8px;
+      text-decoration: none;
     }
+    .logo:hover { color: var(--accent-hover); text-decoration: none; }
     .logo .logo-sub { color: var(--text); font-weight: 300; }
     .logo .logo-date {
       color: var(--text-muted); font-size: 12px;
@@ -158,10 +160,10 @@
 <body>
 <header>
   <div class="container">
-    <div class="logo">
+    <a href="{{ depth|default('') }}index.html" class="logo">
       📈 <span class="logo-sub">Swing</span>Scanner
       {% if scan_date %}<span class="logo-date">{{ scan_date }}</span>{% endif %}
-    </div>
+    </a>
     <nav>
       <a href="{{ depth|default('') }}index.html">리포트</a>
       <a href="{{ depth|default('') }}double_bottom.html">쌍바닥</a>
