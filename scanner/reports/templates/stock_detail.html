@@ -495,6 +495,8 @@
       btn.textContent = '켜기';
       [chartCandle, chartVol].forEach(c => c.timeScale().fitContent());
     }
+    /* 시간축이 켜진/꺼진 차트가 바뀌면 가격축 너비도 변하므로 재동기화 */
+    requestAnimationFrame(() => requestAnimationFrame(syncPriceScaleWidths));
   });
 
   /* ── 시간축 동기화 (logical range 기반)
@@ -514,11 +516,29 @@
     });
   });
 
+  /* ── 가격축 너비 통일 (X 좌표 정렬 보장) ────────────────────
+     세 차트의 rightPriceScale 너비가 다르면 같은 시간이라도
+     timeToCoordinate() 결과가 어긋나 십자선·라벨이 misalign 됨.
+     데이터 로드 후 가장 큰 너비를 기준으로 동기화한다. */
+  function syncPriceScaleWidths() {
+    const charts = [chartCandle, chartVol, chartRsi];
+    const widths = charts.map(c => {
+      try { return c.priceScale('right').width(); } catch (_) { return 0; }
+    });
+    const maxW = Math.max(...widths, 0);
+    if (maxW <= 0) return;
+    charts.forEach(c => {
+      c.applyOptions({ rightPriceScale: { minimumWidth: maxW } });
+    });
+  }
+  /* 폰트·DOM이 다 그려진 뒤 호출되도록 다음 프레임에 실행 */
+  requestAnimationFrame(() => requestAnimationFrame(syncPriceScaleWidths));
+
   /* ── 크로스헤어 동기화 ─────────────────────────────────────── */
   const chartEntries = [
-    { chart: chartCandle, series: candleSeries },
-    { chart: chartVol,    series: volSeries    },
-    { chart: chartRsi,    series: rsiSeries    },
+    { chart: chartCandle, series: candleSeries, el: elCandle },
+    { chart: chartVol,    series: volSeries,    el: elVol    },
+    { chart: chartRsi,    series: rsiSeries,    el: elRsi    },
   ];
 
   function fmt(v, digits = 2) {
@@ -560,6 +580,8 @@
 
     rebuildLookupMaps(currentData);
     fitInitialView();
+    /* 데이터 교체로 가격 자릿수가 바뀔 수 있으므로 가격축 너비 재동기화 */
+    requestAnimationFrame(() => requestAnimationFrame(syncPriceScaleWidths));
 
     document.querySelectorAll('.tf-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.tf === tf));
@@ -581,22 +603,25 @@
   const dateTag    = document.getElementById('crosshair-date-tag');
   const chartPanel = document.querySelector('.chart-panel');
 
-  function updateDateTag(time) {
+  function updateDateTag(time, sourceChart, sourceEl) {
     if (time == null || time === undefined) {
       dateTag.style.display = 'none';
       return;
     }
-    /* 시간축이 표시되는 가장 아래 차트 사용 (RSI on/off 대응) */
-    const bottomChart = rsiVisible ? chartRsi : chartVol;
-    const bottomEl    = rsiVisible ? elRsi    : elVol;
-    const x = bottomChart.timeScale().timeToCoordinate(time);
+    /* X 좌표는 _이벤트가 발생한 차트_ 기준으로 산출해야 십자선 수직선과 정확히 일치한다.
+       세 차트의 가격축 너비가 같다면 어느 차트로 계산해도 동일하지만,
+       경합 상태/리사이즈 직후 등 일시적 차이를 흡수하기 위함. */
+    const x = sourceChart.timeScale().timeToCoordinate(time);
     if (x == null) {
       dateTag.style.display = 'none';
       return;
     }
+    /* 라벨의 Y 위치는 시간축이 표시되는 가장 아래 차트의 하단에 맞춘다. */
+    const bottomEl   = rsiVisible ? elRsi : elVol;
     const panelRect  = chartPanel.getBoundingClientRect();
+    const sourceRect = sourceEl.getBoundingClientRect();
     const bottomRect = bottomEl.getBoundingClientRect();
-    const absoluteX  = (bottomRect.left - panelRect.left) + x;
+    const absoluteX  = (sourceRect.left - panelRect.left) + x;
     const labelTop   = (bottomRect.bottom - panelRect.top) - 22;  /* 시간축 위치에 겹쳐 표시 */
     dateTag.textContent  = fmtDate(time);
     dateTag.style.left   = absoluteX + 'px';
@@ -605,7 +630,7 @@
   }
 
   let isSyncing = false;
-  chartEntries.forEach(({ chart }) => {
+  chartEntries.forEach(({ chart, el }) => {
     chart.subscribeCrosshairMove(param => {
       if (isSyncing) return;
       isSyncing = true;
@@ -619,8 +644,8 @@
         else                    c.clearCrosshairPosition();
       });
 
-      /* 커스텀 시간 레이블 업데이트 */
-      updateDateTag(time);
+      /* 커스텀 시간 레이블 업데이트 (이벤트 발생 차트 기준) */
+      updateDateTag(time, chart, el);
 
       /* 툴바 업데이트 */
       if (time !== undefined) {
