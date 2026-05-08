@@ -20,11 +20,15 @@ def stock_ohlcv(
     from sqlalchemy import select
 
     from scanner.db.models import OHLCVDaily
-    from scanner.reports.html_report import _build_ohlcv_json
     import json
     import pandas as pd
 
     ticker = ticker.upper()
+    # ticker 패턴으로 시장 추론 (한국=6자리 숫자, 미국=알파벳)
+    if ticker.isdigit():
+        from scanner.kr.reports.html_report import _build_ohlcv_json
+    else:
+        from scanner.us.reports.html_report import _build_ohlcv_json
 
     with get_session() as session:
         rows = list(
@@ -64,12 +68,16 @@ def stock_analysis(
     from sqlalchemy import select
 
     from scanner.db.models import ScanResult, Universe
-    from scanner.reports.comment_generator import generate_comment
 
     if scan_date is None:
         scan_date = date.today()
 
     ticker = ticker.upper()
+    # ticker 패턴으로 시장 추론
+    if ticker.isdigit():
+        from scanner.kr.reports.comment_generator import generate_comment
+    else:
+        from scanner.us.reports.comment_generator import generate_comment
 
     with get_session() as session:
         rows = list(

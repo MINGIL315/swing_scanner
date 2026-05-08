@@ -17,7 +17,7 @@ from scanner.db.universe_db import get_active_tickers
 from scanner.db.models import Fundamental, OHLCVDaily, ScanResult, Universe
 from scanner.db.repository import get_scan_results, save_scan_results
 from scanner.db.session import get_session
-from scanner.scanner import scan_universe
+from scanner.kr.scanner import scan_universe
 
 
 # ---------------------------------------------------------------------------

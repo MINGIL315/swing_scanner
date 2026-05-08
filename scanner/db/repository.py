@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from scanner.db.models import ScanResult as ScanResultORM
-from scanner.scanner import TickerScanResult
+from scanner.kr.scanner import TickerScanResult
 
 
 def save_scan_results(

@@ -142,7 +142,7 @@ def test_pattern(
     from scanner.db.migrations import init_database
     from scanner.db.session import get_session
     from scanner.db.models import OHLCVDaily
-    from scanner.patterns import ALL_DETECTORS, get_detector
+    from scanner.kr.patterns import ALL_DETECTORS, get_detector
 
     setup_logger()
     init_database()
@@ -399,7 +399,7 @@ def scan(
         _load_market_map,
         _maybe_update_universe,
     )
-    from scanner.scanner import analyze_ticker
+    from scanner.kr.scanner import analyze_ticker
 
     setup_logger()
     init_database()
@@ -588,7 +588,7 @@ def scan(
     # ── HTML 리포트 자동 생성 ─────────────────────────────────────────
     if not no_report and not interrupted:
         try:
-            from scanner.reports.html_report import generate_daily_report
+            from scanner.kr.reports.html_report import generate_daily_report
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -797,7 +797,7 @@ def report(
     """
     from scanner.config import setup_logger
     from scanner.db.migrations import init_database
-    from scanner.reports.html_report import generate_daily_report
+    from scanner.kr.reports.html_report import generate_daily_report
 
     setup_logger()
     init_database()
@@ -843,7 +843,7 @@ def export(
     """
     from scanner.config import setup_logger
     from scanner.db.migrations import init_database
-    from scanner.reports.excel_export import export_to_csv, export_to_excel
+    from scanner.kr.reports.excel_export import export_to_csv, export_to_excel
 
     setup_logger()
     init_database()
@@ -896,7 +896,7 @@ def backtest(
     from rich.panel import Panel
     from rich.table import Table
 
-    from scanner.backtest.engine import run_backtest
+    from scanner.kr.backtest.engine import run_backtest
     from scanner.config import setup_logger
     from scanner.db.migrations import init_database
 

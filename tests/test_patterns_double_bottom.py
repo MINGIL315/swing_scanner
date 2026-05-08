@@ -32,21 +32,21 @@ def no_signal_df() -> pd.DataFrame:
 class TestDoubleBottomDetect:
     def test_pattern_detected(self, detected_df: pd.DataFrame) -> None:
         """쌍바닥 픽스처에서 패턴이 탐지된다."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         result = DoubleBottomDetector().detect(detected_df, "TEST")
         assert result is not None
 
     def test_no_pattern_on_noise(self, no_signal_df: pd.DataFrame) -> None:
         """노이즈 데이터에서는 패턴이 탐지되지 않는다."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         result = DoubleBottomDetector().detect(no_signal_df, "TEST")
         assert result is None
 
     def test_result_fields(self, detected_df: pd.DataFrame) -> None:
         """PatternResult 모든 필드가 유효 범위에 있다."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         result = DoubleBottomDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -58,7 +58,7 @@ class TestDoubleBottomDetect:
 
     def test_stop_loss_below_lows(self, detected_df: pd.DataFrame) -> None:
         """손절가는 두 저점 평균보다 낮다."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         result = DoubleBottomDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -67,7 +67,7 @@ class TestDoubleBottomDetect:
 
     def test_insufficient_data_returns_none(self) -> None:
         """데이터가 너무 적으면 None."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         df = pd.DataFrame(
             {"open": [100.0] * 30, "high": [101.0] * 30,
@@ -77,7 +77,7 @@ class TestDoubleBottomDetect:
 
     def test_single_trough_returns_none(self) -> None:
         """저점이 1개뿐이면 None."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         import numpy as np
 
@@ -97,7 +97,7 @@ class TestDoubleBottomDetect:
 
     def test_trough_price_tolerance(self) -> None:
         """두 저점 가격 편차가 ±3% 초과이면 None."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         import numpy as np
 
@@ -134,7 +134,7 @@ class TestDoubleBottomHigherLowBonus:
 
     def test_details_exposes_first_last_lows(self, detected_df: pd.DataFrame) -> None:
         """details 에 first_low, last_low, last_first_low_ratio 노출."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         result = DoubleBottomDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -145,7 +145,7 @@ class TestDoubleBottomHigherLowBonus:
 
     def test_higher_low_above_threshold_adds_five(self) -> None:
         """last_low 가 first_low 대비 0.5% 이상 높으면 raw_score +5."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         detector = DoubleBottomDetector()
         common = self._common_kwargs()
@@ -159,7 +159,7 @@ class TestDoubleBottomHigherLowBonus:
 
     def test_higher_low_at_threshold_adds_five(self) -> None:
         """경계값 0.5% 차이는 가산 (≥ 비교)."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         detector = DoubleBottomDetector()
         common = self._common_kwargs()
@@ -173,7 +173,7 @@ class TestDoubleBottomHigherLowBonus:
 
     def test_higher_low_under_threshold_no_bonus(self) -> None:
         """0.5% 미만 차이는 noise 로 간주, 가산 없음."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         detector = DoubleBottomDetector()
         common = self._common_kwargs()
@@ -187,7 +187,7 @@ class TestDoubleBottomHigherLowBonus:
 
     def test_lower_low_no_bonus(self) -> None:
         """last_low < first_low 이면 보너스 없음."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         detector = DoubleBottomDetector()
         common = self._common_kwargs()
@@ -203,21 +203,21 @@ class TestDoubleBottomHigherLowBonus:
 class TestDoubleBottomEntrySignal:
     def test_entry_signal_returns_valid_strength(self, detected_df: pd.DataFrame) -> None:
         """entry_signal strength는 0~100 범위."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         sig = DoubleBottomDetector().entry_signal(detected_df)
         assert 0.0 <= sig.strength <= 100.0
 
     def test_entry_signal_has_four_components(self, detected_df: pd.DataFrame) -> None:
         """신호 컴포넌트가 4개."""
-        from scanner.patterns.double_bottom import DoubleBottomDetector
+        from scanner.kr.patterns.double_bottom import DoubleBottomDetector
 
         sig = DoubleBottomDetector().entry_signal(detected_df)
         assert len(sig.signals) == 4
 
     def test_entry_signal_all_true_gives_100(self) -> None:
         """4개 신호 모두 True이면 strength=100."""
-        from scanner.patterns.base import EntrySignal
+        from scanner.kr.patterns.base import EntrySignal
 
         sig = EntrySignal(
             strength=100.0,

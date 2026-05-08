@@ -10,7 +10,7 @@ from scanner.config import (
     MIN_AVG_TRADING_VALUE_KRW,
     MIN_AVG_TRADING_VALUE_USD,
 )
-from scanner.filtering.volume_filter import _get_value_series, passes_volume_filter
+from scanner.kr.filtering.volume_filter import _get_value_series, passes_volume_filter
 
 
 # ---------------------------------------------------------------------------
