@@ -167,7 +167,8 @@ def _maybe_update_universe(market: str) -> None:
 
     if latest is None or (datetime.now() - latest).days >= 7:
         logger.info("유니버스 자동 갱신 시작")
-        from scanner.data.universe import update_kospi200, update_sp500
+        from scanner.data.kr.universe import update_kospi200
+        from scanner.data.us.universe import update_sp500
 
         m = market.upper()
         if m in ("KR", "ALL"):
