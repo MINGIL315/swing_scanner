@@ -99,6 +99,27 @@ FETCH_TIMEOUT_SECONDS: float = 30.0
 
 
 # ---------------------------------------------------------------------------
+# KIS (한국투자증권) OpenAPI — 한국 주식 데이터 소스
+# ---------------------------------------------------------------------------
+
+# 실전 환경 도메인 (모의는 https://openapivts.koreainvestment.com:29443)
+KIS_BASE_URL: str = os.getenv(
+    "KIS_BASE_URL", "https://openapi.koreainvestment.com:9443"
+)
+KIS_APP_KEY: str = os.getenv("KIS_APP_KEY", "")
+KIS_APP_SECRET: str = os.getenv("KIS_APP_SECRET", "")
+
+# OAuth access_token 파일 캐시 (24h 만료, 재발급은 1시간당 1회 제한 → 캐싱 필수)
+KIS_TOKEN_CACHE_PATH: Path = BASE_DIR / "data" / ".kis_token.json"
+
+# 호출 간격 (초). KIS 시세조회는 보통 초당 ~20건 허용 → 0.05초 보수적.
+KIS_RATE_LIMIT_SECONDS: float = 0.05
+
+# 일봉 차트 한 번 호출당 최대 영업일 수 (KIS API 제약)
+KIS_DAILY_CHUNK_DAYS: int = 100
+
+
+# ---------------------------------------------------------------------------
 # Settings 클래스 (경로 + 환경 변수)
 # ---------------------------------------------------------------------------
 
