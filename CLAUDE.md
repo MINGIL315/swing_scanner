@@ -47,29 +47,30 @@ swing-scanner/
 ├── scanner/
 │   ├── __init__.py
 │   ├── config.py                  # 전역 설정 + 임계값 상수
-│   ├── data/                      # 데이터 수집 계층 — 시장별 분리
+│   ├── kr/                        # 🇰🇷 한국 종목 분석 모듈 — 자체 완결
+│   │   ├── fetcher.py             # KOSPI/KOSDAQ OHLCV·재무 (pykrx → 추후 KRX OpenAPI)
+│   │   ├── universe.py            # KOSPI200 구성종목 갱신
+│   │   ├── scanner.py             # 핵심 분석 (analyze_ticker, scan_universe)
+│   │   ├── indicators/            # MA, RSI, MACD 등
+│   │   ├── patterns/              # 4가지 패턴 탐지기
+│   │   ├── scoring/               # 신뢰도 점수
+│   │   ├── filtering/             # 거래량·재무 필터 (한국 임계값)
+│   │   ├── backtest/              # 백테스트 엔진
+│   │   └── reports/               # HTML/Excel 리포트 (templates/ 포함)
+│   ├── us/                        # 🇺🇸 미국 종목 분석 모듈 — 자체 완결
+│   │   └── (kr/ 와 동일 구조 — yfinance + 미국 임계값)
+│   ├── db/                        # 공통 — SQLAlchemy 모델·세션
+│   │   ├── models.py
+│   │   ├── session.py
+│   │   ├── repository.py
+│   │   ├── migrations.py
+│   │   └── universe_db.py         # 공용 DB 헬퍼 (get_active_tickers 등)
+│   ├── api/                       # 공통 — FastAPI 라우터
 │   │   ├── __init__.py
-│   │   ├── pipeline.py            # 통합 fetch 파이프라인
-│   │   ├── universe.py            # 공용 DB 헬퍼 (get_active_tickers 등)
-│   │   ├── kr/                    # 🇰🇷 한국 (pykrx → 추후 KRX OpenAPI)
-│   │   │   ├── fetcher.py         # KOSPI/KOSDAQ OHLCV·재무
-│   │   │   └── universe.py        # KOSPI200 구성종목 갱신
-│   │   └── us/                    # 🇺🇸 미국 (yfinance)
-│   │       ├── fetcher.py         # NYSE/NASDAQ OHLCV·재무
-│   │       └── universe.py        # S&P500 구성종목 갱신
-│   ├── db/__init__.py             # SQLAlchemy 모델·세션
-│   ├── indicators/__init__.py     # MA, RSI, 볼린저 등 (시장 무관)
-│   ├── patterns/__init__.py       # 4가지 패턴 탐지기 (시장 무관)
-│   ├── scoring/__init__.py        # 신뢰도 점수 (시장 무관)
-│   ├── filtering/__init__.py      # 거래량·재무 필터 (임계값만 시장별)
-│   ├── backtest/__init__.py       # 백테스트 엔진
-│   ├── reports/                   # HTML/Excel/CSV 리포트
-│   │   ├── __init__.py
-│   │   └── templates/             # Jinja2 템플릿
-│   ├── api/                       # FastAPI 라우터
-│   │   ├── __init__.py
-│   │   └── routers/__init__.py
-│   └── cli.py                     # typer 진입점
+│   │   └── routers/
+│   ├── data_pipeline.py           # 통합 데이터 수집 (KR/US 분기)
+│   ├── pipeline.py                # cli scan 명령 흐름
+│   └── cli.py                     # typer 진입점 (공통)
 ├── web/                           # 정적 대시보드 자산
 ├── data/                          # SQLite DB + 캐시 (gitignore)
 ├── logs/                          # 로그 파일 (gitignore)
@@ -78,12 +79,17 @@ swing-scanner/
 └── tests/
     ├── __init__.py
     ├── fixtures/                  # 테스트 픽스처
-    └── data/                      # scanner/data/ 미러링
-        ├── kr/test_fetcher.py     # 한국 fetcher 테스트
-        └── us/test_fetcher.py     # 미국 fetcher 테스트
+    ├── data/                      # 시장별 fetcher 테스트
+    │   ├── kr/test_fetcher.py
+    │   └── us/test_fetcher.py
+    └── test_*.py                  # 분석 알고리즘 테스트 (us 모듈 호출)
 ```
 
-> **시장 분리 정책**: 폴더명 `kr` = Korea(한국), `us` = USA(미국). 데이터 수집은 시장별 데이터 소스/인증/캐싱이 완전히 다르므로(pykrx vs yfinance) **`scanner/data/`** 와 **`tests/data/`** 만 분리한다. 나머지(`patterns/`, `indicators/`, `scoring/`, `filtering/`)는 시장 무관 알고리즘이라 통합 — 시장별 임계값(예: 거래대금 50억 vs 5천만 USD)은 함수 인자로 분기.
+> **시장 분리 정책**: `scanner/kr/` 와 `scanner/us/` 는 **자체 완결 분석 모듈**. 데이터 소스(pykrx vs yfinance), 시장 임계값(거래대금 50억원 vs 5천만 USD), 향후 시장별 알고리즘 차이를 자체 보유. 현재는 동일 코드 복제 상태.
+>
+> **공통**: `scanner/db/`, `scanner/api/`, `scanner/cli.py`, `scanner/config.py` — DB 모델, FastAPI, CLI dispatcher 는 시장 무관.
+>
+> **호출 정책**: 양쪽 코드가 동일하므로 cli/pipeline/db/api/backtest 등 일반 호출처는 한쪽(`scanner.kr.X` 또는 `scanner.us.X`)에서 호출. `api/stocks/{ticker}` 만 ticker 추론(`isdigit()`)으로 KR/US 분기. 분석 알고리즘이 시장별로 갈라질 때 명시적 분기로 evolve 가능.
 
 ## 5. 4가지 패턴 정의
 
