@@ -32,16 +32,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from scanner.config import FETCH_MAX_WORKERS, settings
-from scanner.data.fetcher_kr import (
-    fetch_kr_daily,
-    fetch_kr_fundamental,
-    fetch_kr_weekly,
-)
-from scanner.data.fetcher_us import (
-    fetch_us_daily,
-    fetch_us_fundamental,
-    fetch_us_weekly,
-)
+from scanner.data.kr import fetcher as kr_fetcher
+from scanner.data.us import fetcher as us_fetcher
 from scanner.data.universe import get_active_tickers
 from scanner.db.models import Fundamental, OHLCVDaily, OHLCVWeekly, Universe
 from scanner.db.session import get_session
@@ -162,11 +154,11 @@ def _fetch_ohlcv_one(
     """
     try:
         if market == "KR":
-            df_d = fetch_kr_daily(ticker, start, end)
-            df_w = fetch_kr_weekly(ticker, start, end)
+            df_d = kr_fetcher.fetch_daily(ticker, start, end)
+            df_w = kr_fetcher.fetch_weekly(ticker, start, end)
         else:
-            df_d = fetch_us_daily(ticker, start, end)
-            df_w = fetch_us_weekly(ticker, start, end)
+            df_d = us_fetcher.fetch_daily(ticker, start, end)
+            df_w = us_fetcher.fetch_weekly(ticker, start, end)
 
         _upsert_ohlcv_daily(_df_to_dicts(df_d))
         _upsert_ohlcv_weekly(_df_to_dicts(df_w))
@@ -185,9 +177,9 @@ def _fetch_fundamental_one(
     """단일 종목 재무를 fetch 후 DB에 저장한다."""
     try:
         if market == "KR":
-            df = fetch_kr_fundamental(ticker, target_date - timedelta(days=5), target_date)
+            df = kr_fetcher.fetch_fundamental(ticker, target_date - timedelta(days=5), target_date)
         else:
-            df = fetch_us_fundamental(ticker)
+            df = us_fetcher.fetch_fundamental(ticker)
 
         _upsert_fundamental(_df_to_dicts(df))
         return ticker, True, ""
