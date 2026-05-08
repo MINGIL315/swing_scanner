@@ -23,7 +23,8 @@
 | 카테고리 | 사용 라이브러리/도구 |
 | --- | --- |
 | 언어 | **Python 3.11+** 권장 (최소 3.10) |
-| 데이터 | `pykrx` (한국), `yfinance` (미국) |
+| 데이터 | KIS OpenAPI + 종목 마스터 (한국), `yfinance` (미국) |
+| HTTP | `httpx` (KIS 호출) |
 | 데이터프레임 | `pandas`, `numpy`, `scipy` |
 | DB | **SQLite** + `sqlalchemy` 2.0 |
 | API | `fastapi`, `uvicorn[standard]` |
@@ -162,7 +163,7 @@ swing-scanner/
   - Python: `sys.stdout.reconfigure(encoding="utf-8")` 또는 `PYTHONIOENCODING=utf-8` 환경변수 사용.
   - `.bat` 스크립트는 **첫 줄에 `chcp 65001`** 을 두어 콘솔을 UTF-8로 전환한다.
 - 파일 경로 구분자는 `pathlib.Path`로 정규화 (백슬래시 하드코딩 금지).
-- `pykrx`는 KRX 서버에 의존 → 휴장일/장중 호출 시 빈 DataFrame을 반환할 수 있음. 항상 빈 결과 검증.
+- 외부 데이터 fetch (KIS / yfinance / KIS 마스터 zip) 는 휴장일/네트워크 장애 시 빈 결과를 반환할 수 있음 — 호출처는 항상 빈 결과 검증.
 
 ## 11. Git 워크플로우
 
