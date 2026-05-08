@@ -27,7 +27,7 @@ def run_backtest(req: BacktestRequest = Body(...)) -> dict[str, Any]:
             detail=f"알 수 없는 패턴: {req.pattern_name}",
         )
 
-    from scanner.backtest.engine import run_backtest as _run
+    from scanner.kr.backtest.engine import run_backtest as _run
 
     result = _run(
         pattern_name=req.pattern_name,

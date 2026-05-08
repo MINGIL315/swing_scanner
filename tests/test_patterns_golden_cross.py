@@ -32,21 +32,21 @@ def no_signal_df() -> pd.DataFrame:
 class TestGoldenCrossDetect:
     def test_pattern_detected(self, detected_df: pd.DataFrame) -> None:
         """골든크로스 픽스처에서 패턴이 탐지된다."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         result = GoldenCrossDetector().detect(detected_df, "TEST")
         assert result is not None
 
     def test_no_pattern_on_steady_uptrend(self, no_signal_df: pd.DataFrame) -> None:
         """MA20이 이미 MA60 위에서 지속 상승하면 None."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         result = GoldenCrossDetector().detect(no_signal_df, "TEST")
         assert result is None
 
     def test_result_fields(self, detected_df: pd.DataFrame) -> None:
         """PatternResult 필드가 유효 범위."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         result = GoldenCrossDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -57,7 +57,7 @@ class TestGoldenCrossDetect:
 
     def test_cross_recency(self, detected_df: pd.DataFrame) -> None:
         """크로스가 최근 5일 이내 발생."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
         from scanner.config import GOLDEN_CROSS_RECENT_DAYS
 
         result = GoldenCrossDetector().detect(detected_df, "TEST")
@@ -66,7 +66,7 @@ class TestGoldenCrossDetect:
 
     def test_insufficient_data_returns_none(self) -> None:
         """데이터 부족 시 None."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         df = pd.DataFrame(
             {"open": [100.0] * 50, "high": [101.0] * 50,
@@ -76,7 +76,7 @@ class TestGoldenCrossDetect:
 
     def test_cross_too_old_returns_none(self) -> None:
         """크로스가 5일 초과로 오래되면 None."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         rng = np.random.default_rng(77)
         n = 120
@@ -96,7 +96,7 @@ class TestGoldenCrossDetect:
 
     def test_low_volume_returns_none(self) -> None:
         """거래량이 1.2배 미만이면 None."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         df = pd.read_csv(
             str(FIXTURE_DIR / "golden_cross_detected.csv"), parse_dates=["date"]
@@ -109,7 +109,7 @@ class TestGoldenCrossDetect:
 
     def test_steep_ma60_decline_returns_none(self) -> None:
         """MA60 급락(-1% 이상) 시 None."""
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         rng = np.random.default_rng(33)
         n = 110
@@ -129,13 +129,13 @@ class TestGoldenCrossDetect:
 
 class TestGoldenCrossEntrySignal:
     def test_entry_signal_returns_valid_strength(self, detected_df: pd.DataFrame) -> None:
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         sig = GoldenCrossDetector().entry_signal(detected_df)
         assert 0.0 <= sig.strength <= 100.0
 
     def test_entry_signal_has_four_components(self, detected_df: pd.DataFrame) -> None:
-        from scanner.patterns.golden_cross import GoldenCrossDetector
+        from scanner.kr.patterns.golden_cross import GoldenCrossDetector
 
         sig = GoldenCrossDetector().entry_signal(detected_df)
         assert len(sig.signals) == 4

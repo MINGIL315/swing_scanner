@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from scanner.backtest.engine import (
+from scanner.kr.backtest.engine import (
     _calc_max_drawdown,
     _empty_result,
     _simulate_trade,
