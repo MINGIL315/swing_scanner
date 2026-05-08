@@ -177,7 +177,7 @@ def _fetch_fundamental_one(
     """단일 종목 재무를 fetch 후 DB에 저장한다."""
     try:
         if market == "KR":
-            df = kr_fetcher.fetch_fundamental(ticker, target_date - timedelta(days=5), target_date)
+            df = kr_fetcher.fetch_fundamental(ticker)
         else:
             df = us_fetcher.fetch_fundamental(ticker)
 
