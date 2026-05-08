@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Swing Scanner — {{ pattern_label }} 패턴 목록{% endblock %}
+
+{% block head_extra %}
+<style>
+  .filter-bar {
+    display: flex; gap: 12px; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .filter-bar select, .filter-bar input[type="number"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .filter-bar select:focus,
+  .filter-bar input[type="number"]:focus { border-color: var(--accent); }
+  .filter-count { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+  .data-table th.asc::after  { content: " ↑"; color: var(--accent); }
+  .data-table th.desc::after { content: " ↓"; color: var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+{# ── 헤더 ────────────────────────────────────────────────────────── #}
+<div class="flex items-center justify-between" style="margin-bottom:20px">
+  <div>
+    <h1 class="text-xl font-bold">
+      <span class="badge badge-{{ pattern_key.replace('_','-') }}"
+            style="font-size:14px;padding:3px 10px">{{ pattern_label }}</span>
+      &nbsp;패턴 종목 목록
+    </h1>
+    <p class="text-muted text-sm mt8">
+      {{ scan_date }}
+      &middot; <a href="index.html">← 일일 리포트</a>
+    </p>
+  </div>
+  <div class="text-muted text-sm">총 {{ rows|length }}종목</div>
+</div>
+
+{# ── 필터 바 ─────────────────────────────────────────────────────── #}
+<div class="filter-bar">
+  <select id="mktFilter" onchange="applyFilters()">
+    <option value="">전체 시장</option>
+    <option value="KR">한국 (KR)</option>
+    <option value="US">미국 (US)</option>
+  </select>
+  <select id="trendFilter" onchange="applyFilters()">
+    <option value="">전체 추세</option>
+    <option value="uptrend">▲ 상승</option>
+    <option value="sideways">— 횡보</option>
+    <option value="downtrend">▼ 하락</option>
+  </select>
+  <input type="number" id="minScore" placeholder="최소 점수" min="0" max="100"
+         oninput="applyFilters()" style="width:100px">
+  <span class="filter-count" id="filterCount"></span>
+</div>
+
+{# ── 종목 테이블 ─────────────────────────────────────────────────── #}
+<div class="card" style="padding:0;overflow-x:auto">
+  <table class="data-table" id="mainTable">
+    <thead>
+      <tr>
+        <th style="width:36px">#</th>
+        <th class="sortable" data-col="1" onclick="sortTable(1)">종목</th>
+        <th class="sortable" data-col="2" onclick="sortTable(2)">신뢰도</th>
+        <th style="text-align:right" class="sortable" data-col="3" onclick="sortTable(3)">진입가</th>
+        <th style="text-align:right">손절가</th>
+        <th style="text-align:right">목표가</th>
+        <th style="text-align:right" class="sortable" data-col="6" onclick="sortTable(6)">R:R</th>
+        <th>주봉추세</th>
+        <th>시장</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+      {% for row in rows %}
+      {% set score = row.confidence_score %}
+      {% set score_color = "var(--success)" if score >= 80 else ("var(--accent)" if score >= 70 else "var(--golden-cross)") %}
+      <tr data-market="{{ (row.market or 'KR').upper() }}"
+          data-trend="{{ row.trend_weekly or '' }}"
+          data-score="{{ score }}">
+        <td class="text-muted font-mono">{{ loop.index }}</td>
+        <td>
+          <a href="stocks/{{ row.ticker }}.html" class="font-mono font-bold">
+            {{ row.ticker }}
+          </a>
+        </td>
+        <td>
+          <div class="score-bar">
+            <span class="font-mono font-bold nowrap" style="color:{{ score_color }}">
+              {{ "%.1f"|format(score) }}
+            </span>
+            <div class="bar-bg">
+              <div class="bar-fill" style="width:{{ score }}%;background:{{ score_color }}"></div>
+            </div>
+          </div>
+        </td>
+        <td class="font-mono nowrap" style="text-align:right">
+          {{ "%.2f"|format(row.entry_price) if row.entry_price else "—" }}
+        </td>
+        <td class="font-mono nowrap danger" style="text-align:right">
+          {{ "%.2f"|format(row.stop_loss) if row.stop_loss else "—" }}
+        </td>
+        <td class="font-mono nowrap success" style="text-align:right">
+          {{ "%.2f"|format(row.target_price) if row.target_price else "—" }}
+        </td>
+        <td class="font-mono nowrap" style="text-align:right">
+          {% if row.risk_reward_ratio %}1:{{ "%.1f"|format(row.risk_reward_ratio) }}{% else %}—{% endif %}
+        </td>
+        <td class="nowrap">
+          {% if row.trend_weekly == "uptrend" %}<span class="success">▲ 상승</span>
+          {% elif row.trend_weekly == "downtrend" %}<span class="danger">▼ 하락</span>
+          {% else %}<span class="text-muted">— 횡보</span>{% endif %}
+        </td>
+        <td>
+          <span class="badge badge-{{ (row.market or 'kr').lower() }}">
+            {{ (row.market or "KR").upper() }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  let _sortCol = 2, _sortAsc = false;
+
+  function sortTable(col) {
+    const tbody = document.getElementById('tableBody');
+    const rows  = Array.from(tbody.querySelectorAll('tr'));
+
+    if (_sortCol === col) _sortAsc = !_sortAsc;
+    else { _sortCol = col; _sortAsc = false; }
+
+    rows.sort((a, b) => {
+      const va = a.cells[col] ? a.cells[col].textContent.trim() : '';
+      const vb = b.cells[col] ? b.cells[col].textContent.trim() : '';
+      const na = parseFloat(va.replace(/[^0-9.\-]/g, '')), nb = parseFloat(vb.replace(/[^0-9.\-]/g, ''));
+      const cmp = isNaN(na) || isNaN(nb) ? va.localeCompare(vb, 'ko') : (na - nb);
+      return _sortAsc ? cmp : -cmp;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+
+    document.querySelectorAll('th.sortable').forEach(th => {
+      th.classList.remove('asc', 'desc');
+      if (parseInt(th.dataset.col) === col) {
+        th.classList.add(_sortAsc ? 'asc' : 'desc');
+      }
+    });
+  }
+
+  function applyFilters() {
+    const mkt   = document.getElementById('mktFilter').value;
+    const trend = document.getElementById('trendFilter').value;
+    const minS  = parseFloat(document.getElementById('minScore').value) || 0;
+    let visible = 0;
+
+    document.querySelectorAll('#tableBody tr').forEach(r => {
+      const show = (!mkt   || r.dataset.market === mkt)
+                && (!trend || r.dataset.trend  === trend)
+                && (parseFloat(r.dataset.score) >= minS);
+      r.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+
+    document.getElementById('filterCount').textContent = visible + '개 종목';
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    applyFilters();
+    sortTable(2);   // 신뢰도 내림차순 기본
+  });
+</script>
+{% endblock %}
