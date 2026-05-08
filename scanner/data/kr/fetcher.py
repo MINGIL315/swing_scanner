@@ -1,13 +1,13 @@
-"""한국 주식 데이터 수집기 (pykrx 기반).
+"""한국(KOSPI/KOSDAQ) 주식 데이터 수집기 (pykrx 기반).
 
 pykrx API 호출마다 0.2초 지연 + 최대 3회 exponential backoff 재시도를 적용해
 KRX 서버 부하를 방지하고 간헐적 실패를 복구한다.
 
 주요 함수:
-    fetch_kr_daily       : 일봉 OHLCV
-    fetch_kr_weekly      : 주봉 OHLCV (일봉을 리샘플)
-    fetch_kr_intraday    : 60분봉 OHLCV
-    fetch_kr_fundamental : PER/PBR/ROE/시가총액
+    fetch_daily       : 일봉 OHLCV
+    fetch_weekly      : 주봉 OHLCV (일봉을 리샘플)
+    fetch_intraday    : 60분봉 OHLCV
+    fetch_fundamental : PER/PBR/ROE/시가총액
 """
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def fetch_kr_daily(
+def fetch_daily(
     ticker: str,
     start: date,
     end: date,
@@ -139,7 +139,7 @@ def fetch_kr_daily(
     return df[[c for c in ["ticker", "date", "open", "high", "low", "close", "volume", "value"] if c in df.columns]]
 
 
-def fetch_kr_weekly(
+def fetch_weekly(
     ticker: str,
     start: date,
     end: date,
@@ -156,7 +156,7 @@ def fetch_kr_weekly(
     """
     # 주봉 생성을 위해 최소 1주 앞 데이터 확보
     adjusted_start = start - timedelta(days=7)
-    df_daily = fetch_kr_daily(ticker, adjusted_start, end)
+    df_daily = fetch_daily(ticker, adjusted_start, end)
     if df_daily.empty:
         return pd.DataFrame()
 
@@ -181,7 +181,7 @@ def fetch_kr_weekly(
     return df_w
 
 
-def fetch_kr_intraday(
+def fetch_intraday(
     ticker: str,
     target_date: date,
 ) -> pd.DataFrame:
@@ -207,7 +207,7 @@ def fetch_kr_intraday(
     )
 
 
-def fetch_kr_fundamental(
+def fetch_fundamental(
     ticker: str,
     start: date,
     end: date,

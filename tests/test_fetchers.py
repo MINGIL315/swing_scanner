@@ -52,7 +52,7 @@ def _assert_column_dtypes(df: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
-# fetcher_kr 테스트
+# kr.fetcher 테스트
 # ---------------------------------------------------------------------------
 
 
@@ -60,10 +60,10 @@ class TestFetchKrDaily:
     @network
     def test_samsung_returns_dataframe(self) -> None:
         """삼성전자(005930) 일봉이 유효한 DataFrame을 반환한다."""
-        from scanner.data.fetcher_kr import fetch_kr_daily
+        from scanner.data.kr.fetcher import fetch_daily
 
         start, end = _recent_range(30)
-        df = fetch_kr_daily("005930", start, end)
+        df = fetch_daily("005930", start, end)
         _assert_ohlcv_columns(df, ["ticker", "date", "open", "high", "low", "close", "volume"])
         _assert_no_negative_prices(df)
         _assert_column_dtypes(df)
@@ -72,10 +72,10 @@ class TestFetchKrDaily:
     @network
     def test_date_range_is_respected(self) -> None:
         """반환된 데이터의 날짜가 요청 범위 안에 있다."""
-        from scanner.data.fetcher_kr import fetch_kr_daily
+        from scanner.data.kr.fetcher import fetch_daily
 
         start, end = _recent_range(10)
-        df = fetch_kr_daily("005930", start, end)
+        df = fetch_daily("005930", start, end)
         if df.empty:
             pytest.skip("데이터 없음 (휴장일 가능성)")
         dates = pd.to_datetime(df["date"])
@@ -84,10 +84,10 @@ class TestFetchKrDaily:
 
     def test_invalid_ticker_returns_empty(self) -> None:
         """존재하지 않는 티커는 빈 DataFrame을 반환한다 (네트워크 호출 포함)."""
-        from scanner.data.fetcher_kr import fetch_kr_daily
+        from scanner.data.kr.fetcher import fetch_daily
 
         start, end = _recent_range(5)
-        df = fetch_kr_daily("INVALID_TICKER_XYZ", start, end)
+        df = fetch_daily("INVALID_TICKER_XYZ", start, end)
         assert isinstance(df, pd.DataFrame)
 
 
@@ -95,21 +95,21 @@ class TestFetchKrWeekly:
     @network
     def test_samsung_weekly_columns(self) -> None:
         """삼성전자 주봉이 week_start_date 컬럼을 포함한다."""
-        from scanner.data.fetcher_kr import fetch_kr_weekly
+        from scanner.data.kr.fetcher import fetch_weekly
 
         start, end = _recent_range(60)
-        df = fetch_kr_weekly("005930", start, end)
+        df = fetch_weekly("005930", start, end)
         _assert_ohlcv_columns(df, ["ticker", "week_start_date", "open", "close", "volume"])
         _assert_column_dtypes(df)
 
     @network
     def test_weekly_rows_less_than_daily(self) -> None:
         """주봉 행 수는 같은 기간 일봉 행 수보다 적다."""
-        from scanner.data.fetcher_kr import fetch_kr_daily, fetch_kr_weekly
+        from scanner.data.kr.fetcher import fetch_daily, fetch_weekly
 
         start, end = _recent_range(60)
-        df_d = fetch_kr_daily("005930", start, end)
-        df_w = fetch_kr_weekly("005930", start, end)
+        df_d = fetch_daily("005930", start, end)
+        df_w = fetch_weekly("005930", start, end)
         if df_d.empty or df_w.empty:
             pytest.skip("데이터 없음")
         assert len(df_w) < len(df_d)
@@ -119,10 +119,10 @@ class TestFetchKrFundamental:
     @network
     def test_samsung_fundamental_columns(self) -> None:
         """삼성전자 재무 데이터가 per/pbr 컬럼을 포함한다."""
-        from scanner.data.fetcher_kr import fetch_kr_fundamental
+        from scanner.data.kr.fetcher import fetch_fundamental
 
         start, end = _recent_range(10)
-        df = fetch_kr_fundamental("005930", start, end)
+        df = fetch_fundamental("005930", start, end)
         if df.empty:
             pytest.skip("재무 데이터 없음")
         assert "ticker" in df.columns
@@ -130,26 +130,26 @@ class TestFetchKrFundamental:
 
     def test_empty_result_is_dataframe(self) -> None:
         """실패 시 빈 DataFrame(타입)을 반환한다."""
-        from scanner.data.fetcher_kr import fetch_kr_fundamental
+        from scanner.data.kr.fetcher import fetch_fundamental
 
         start, end = _recent_range(5)
-        df = fetch_kr_fundamental("INVALID000", start, end)
+        df = fetch_fundamental("INVALID000", start, end)
         assert isinstance(df, pd.DataFrame)
 
 
 class TestFetchKrIntraday:
     def test_intraday_returns_dataframe_with_correct_columns(self) -> None:
         """60분봉 함수가 항상 올바른 컬럼을 가진 DataFrame을 반환한다 (현재 빈 결과)."""
-        from scanner.data.fetcher_kr import fetch_kr_intraday
+        from scanner.data.kr.fetcher import fetch_intraday
 
-        df = fetch_kr_intraday("005930", date.today())
+        df = fetch_intraday("005930", date.today())
         assert isinstance(df, pd.DataFrame)
         expected_cols = {"ticker", "datetime", "open", "high", "low", "close", "volume"}
         assert expected_cols.issubset(set(df.columns))
 
 
 # ---------------------------------------------------------------------------
-# fetcher_us 테스트
+# us.fetcher 테스트
 # ---------------------------------------------------------------------------
 
 
@@ -157,10 +157,10 @@ class TestFetchUsDaily:
     @network
     def test_aapl_returns_dataframe(self) -> None:
         """AAPL 일봉이 유효한 DataFrame을 반환한다."""
-        from scanner.data.fetcher_us import fetch_us_daily
+        from scanner.data.us.fetcher import fetch_daily
 
         start, end = _recent_range(30)
-        df = fetch_us_daily("AAPL", start, end)
+        df = fetch_daily("AAPL", start, end)
         _assert_ohlcv_columns(df, ["ticker", "date", "open", "high", "low", "close", "volume"])
         _assert_no_negative_prices(df)
         _assert_column_dtypes(df)
@@ -169,10 +169,10 @@ class TestFetchUsDaily:
     @network
     def test_date_range_is_respected(self) -> None:
         """반환된 데이터의 날짜가 요청 범위 안에 있다."""
-        from scanner.data.fetcher_us import fetch_us_daily
+        from scanner.data.us.fetcher import fetch_daily
 
         start, end = _recent_range(10)
-        df = fetch_us_daily("AAPL", start, end)
+        df = fetch_daily("AAPL", start, end)
         if df.empty:
             pytest.skip("데이터 없음 (공휴일 가능성)")
         dates = pd.to_datetime(df["date"])
@@ -181,10 +181,10 @@ class TestFetchUsDaily:
 
     def test_invalid_ticker_returns_empty(self) -> None:
         """존재하지 않는 티커는 빈 DataFrame을 반환한다."""
-        from scanner.data.fetcher_us import fetch_us_daily
+        from scanner.data.us.fetcher import fetch_daily
 
         start, end = _recent_range(5)
-        df = fetch_us_daily("INVALID_TICKER_XYZ_999", start, end)
+        df = fetch_daily("INVALID_TICKER_XYZ_999", start, end)
         assert isinstance(df, pd.DataFrame)
 
 
@@ -192,21 +192,21 @@ class TestFetchUsWeekly:
     @network
     def test_aapl_weekly_columns(self) -> None:
         """AAPL 주봉이 week_start_date 컬럼을 포함한다."""
-        from scanner.data.fetcher_us import fetch_us_weekly
+        from scanner.data.us.fetcher import fetch_weekly
 
         start, end = _recent_range(60)
-        df = fetch_us_weekly("AAPL", start, end)
+        df = fetch_weekly("AAPL", start, end)
         _assert_ohlcv_columns(df, ["ticker", "week_start_date", "open", "close", "volume"])
         _assert_column_dtypes(df)
 
     @network
     def test_weekly_rows_less_than_daily(self) -> None:
         """주봉 행 수는 같은 기간 일봉 행 수보다 적다."""
-        from scanner.data.fetcher_us import fetch_us_daily, fetch_us_weekly
+        from scanner.data.us.fetcher import fetch_daily, fetch_weekly
 
         start, end = _recent_range(60)
-        df_d = fetch_us_daily("AAPL", start, end)
-        df_w = fetch_us_weekly("AAPL", start, end)
+        df_d = fetch_daily("AAPL", start, end)
+        df_w = fetch_weekly("AAPL", start, end)
         if df_d.empty or df_w.empty:
             pytest.skip("데이터 없음")
         assert len(df_w) < len(df_d)
@@ -216,7 +216,7 @@ class TestFetchUsIntraday:
     @network
     def test_aapl_intraday_columns(self) -> None:
         """AAPL 60분봉이 올바른 컬럼을 가진다."""
-        from scanner.data.fetcher_us import fetch_us_intraday
+        from scanner.data.us.fetcher import fetch_intraday
 
         # 최근 평일 (주말은 데이터 없음)
         today = date.today()
@@ -228,7 +228,7 @@ class TestFetchUsIntraday:
         else:
             pytest.skip("최근 7일 내 평일 없음")
 
-        df = fetch_us_intraday("AAPL", target)
+        df = fetch_intraday("AAPL", target)
         if df.empty:
             pytest.skip("intraday 데이터 없음 (장 전/후 가능성)")
         _assert_ohlcv_columns(df, ["ticker", "datetime", "open", "high", "low", "close", "volume"])
@@ -236,10 +236,10 @@ class TestFetchUsIntraday:
 
     def test_empty_result_is_dataframe(self) -> None:
         """미래 날짜 요청 시 빈 DataFrame을 반환한다."""
-        from scanner.data.fetcher_us import fetch_us_intraday
+        from scanner.data.us.fetcher import fetch_intraday
 
         future = date.today() + timedelta(days=30)
-        df = fetch_us_intraday("AAPL", future)
+        df = fetch_intraday("AAPL", future)
         assert isinstance(df, pd.DataFrame)
 
 
@@ -247,9 +247,9 @@ class TestFetchUsFundamental:
     @network
     def test_aapl_fundamental_has_required_fields(self) -> None:
         """AAPL 재무 지표에 ticker/date/market_cap 이 있다."""
-        from scanner.data.fetcher_us import fetch_us_fundamental
+        from scanner.data.us.fetcher import fetch_fundamental
 
-        df = fetch_us_fundamental("AAPL")
+        df = fetch_fundamental("AAPL")
         if df.empty:
             pytest.skip("재무 데이터 없음")
         assert "ticker" in df.columns
@@ -259,7 +259,7 @@ class TestFetchUsFundamental:
 
     def test_empty_result_is_dataframe(self) -> None:
         """실패 시 빈 DataFrame(타입)을 반환한다."""
-        from scanner.data.fetcher_us import fetch_us_fundamental
+        from scanner.data.us.fetcher import fetch_fundamental
 
-        df = fetch_us_fundamental("INVALID_XYZ_999")
+        df = fetch_fundamental("INVALID_XYZ_999")
         assert isinstance(df, pd.DataFrame)

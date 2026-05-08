@@ -39,7 +39,8 @@ def update_universe(
     all → 둘 다
     """
     from scanner.config import setup_logger
-    from scanner.data.universe import update_kospi200, update_sp500
+    from scanner.data.kr.universe import update_kospi200
+    from scanner.data.us.universe import update_sp500
     from scanner.db.migrations import init_database
 
     setup_logger()

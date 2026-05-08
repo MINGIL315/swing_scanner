@@ -3,10 +3,10 @@
 yfinance 세션 재사용 + 최대 3회 exponential backoff 재시도.
 
 주요 함수:
-    fetch_us_daily       : 일봉 OHLCV
-    fetch_us_weekly      : 주봉 OHLCV
-    fetch_us_intraday    : 60분봉 OHLCV (최근 60일 한정 — yfinance 제약)
-    fetch_us_fundamental : EPS/PER/PBR/시가총액
+    fetch_daily       : 일봉 OHLCV
+    fetch_weekly      : 주봉 OHLCV
+    fetch_intraday    : 60분봉 OHLCV (최근 60일 한정 — yfinance 제약)
+    fetch_fundamental : EPS/PER/PBR/시가총액
 """
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def _normalize_yf_ohlcv(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def fetch_us_daily(
+def fetch_daily(
     ticker: str,
     start: date,
     end: date,
@@ -142,7 +142,7 @@ def fetch_us_daily(
     return df[keep]
 
 
-def fetch_us_weekly(
+def fetch_weekly(
     ticker: str,
     start: date,
     end: date,
@@ -180,7 +180,7 @@ def fetch_us_weekly(
     return df[keep]
 
 
-def fetch_us_intraday(
+def fetch_intraday(
     ticker: str,
     target_date: date,
 ) -> pd.DataFrame:
@@ -241,7 +241,7 @@ def fetch_us_intraday(
     return df[keep].reset_index(drop=True)
 
 
-def fetch_us_fundamental(ticker: str) -> pd.DataFrame:
+def fetch_fundamental(ticker: str) -> pd.DataFrame:
     """yfinance Ticker.info 에서 재무 지표를 가져온다.
 
     PER(trailingPE), PBR(priceToBook), 시가총액(marketCap)을 파싱한다.
