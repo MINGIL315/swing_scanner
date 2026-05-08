@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Mingil" }]
 license = { text = "MIT" }
-keywords = ["stock", "swing-trading", "technical-analysis", "korea", "us", "pykrx", "yfinance"]
+keywords = ["stock", "swing-trading", "technical-analysis", "korea", "us", "kis", "yfinance"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Financial and Insurance Industry",
@@ -23,7 +23,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "pykrx>=1.0.45",
     "yfinance>=0.2.40",
     "pandas>=2.2",
     "numpy>=1.26",
