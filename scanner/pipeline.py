@@ -13,7 +13,7 @@ from loguru import logger
 from sqlalchemy import and_, func, select
 
 from scanner.config import CONFIDENCE_THRESHOLD, FETCH_MAX_WORKERS, settings
-from scanner.data.universe import get_active_tickers
+from scanner.db.universe_db import get_active_tickers
 from scanner.db.models import Fundamental, OHLCVDaily, ScanResult, Universe
 from scanner.db.repository import get_scan_results, save_scan_results
 from scanner.db.session import get_session
@@ -167,8 +167,8 @@ def _maybe_update_universe(market: str) -> None:
 
     if latest is None or (datetime.now() - latest).days >= 7:
         logger.info("유니버스 자동 갱신 시작")
-        from scanner.data.kr.universe import update_kospi200
-        from scanner.data.us.universe import update_sp500
+        from scanner.kr.universe import update_kospi200
+        from scanner.us.universe import update_sp500
 
         m = market.upper()
         if m in ("KR", "ALL"):

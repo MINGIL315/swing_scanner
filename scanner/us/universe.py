@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 from loguru import logger
 
-from scanner.data.universe import _upsert_tickers
+from scanner.db.universe_db import _upsert_tickers
 from scanner.db.session import get_session
 
 # Wikipedia S&P500 목록 URL

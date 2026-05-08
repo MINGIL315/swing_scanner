@@ -11,7 +11,7 @@ from datetime import date
 import pandas as pd
 from loguru import logger
 
-from scanner.data.universe import _upsert_tickers
+from scanner.db.universe_db import _upsert_tickers
 from scanner.db.session import get_session
 
 # pykrx는 선택적 임포트 (네트워크 없는 환경에서도 import 자체는 성공)

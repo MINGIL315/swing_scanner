@@ -39,8 +39,8 @@ def update_universe(
     all → 둘 다
     """
     from scanner.config import setup_logger
-    from scanner.data.kr.universe import update_kospi200
-    from scanner.data.us.universe import update_sp500
+    from scanner.kr.universe import update_kospi200
+    from scanner.us.universe import update_sp500
     from scanner.db.migrations import init_database
 
     setup_logger()
@@ -389,7 +389,7 @@ def scan(
     from rich.table import Table
 
     from scanner.config import FETCH_MAX_WORKERS, setup_logger
-    from scanner.data.universe import get_active_tickers
+    from scanner.db.universe_db import get_active_tickers
     from scanner.db.migrations import init_database
     from scanner.db.repository import get_scan_results, save_scan_results
     from scanner.db.session import get_session

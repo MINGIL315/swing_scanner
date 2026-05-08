@@ -280,7 +280,7 @@ scanner scan
 Universe 테이블이 비어 있습니다. 유니버스를 수동으로 갱신하세요.
 
 ```bash
-python -c "from scanner.data.universe import update_kospi200, update_sp500; update_kospi200(); update_sp500()"
+python -c "from scanner.kr.universe import update_kospi200; from scanner.us.universe import update_sp500; update_kospi200(); update_sp500()"
 ```
 
 또는 `--skip-fetch` 없이 `scanner scan` 을 실행하면 자동으로 갱신됩니다.

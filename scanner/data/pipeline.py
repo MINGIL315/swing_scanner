@@ -34,7 +34,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from scanner.config import FETCH_MAX_WORKERS, settings
 from scanner.data.kr import fetcher as kr_fetcher
 from scanner.data.us import fetcher as us_fetcher
-from scanner.data.universe import get_active_tickers
+from scanner.db.universe_db import get_active_tickers
 from scanner.db.models import Fundamental, OHLCVDaily, OHLCVWeekly, Universe
 from scanner.db.session import get_session
 

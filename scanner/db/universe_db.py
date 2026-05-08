@@ -1,8 +1,8 @@
 """종목 유니버스 공용 DB 헬퍼.
 
 KR/US 의 update_* 함수는 각 시장별 모듈에 있다:
-    - scanner.data.kr.universe.update_kospi200
-    - scanner.data.us.universe.update_sp500
+    - scanner.kr.universe.update_kospi200
+    - scanner.us.universe.update_sp500
 
 주요 함수 (공용):
     get_active_tickers : DB에서 활성 종목 티커 목록 반환
