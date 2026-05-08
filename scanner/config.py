@@ -84,17 +84,20 @@ RECENT_VOLUME_LOOKBACK_DAYS: int = 5                    # 최근 N일 평균 거
 
 MIN_MARKET_CAP_KRW: float = 100_000_000_000   # 시가총액 1000억원
 MIN_MARKET_CAP_USD: float = 1_000_000_000     # 시가총액 10억 USD
-MAX_DEBT_RATIO_KR: float = 200.0              # 부채비율 < 200%
 
 
 # ---------------------------------------------------------------------------
 # 데이터 fetch 동시성 / 재시도
 # ---------------------------------------------------------------------------
 
-FETCH_MAX_WORKERS: int = 5
+FETCH_MAX_WORKERS: int = 2                     # KIS 서버 부하 회피 — 동시 호출 적게
 FETCH_RETRY_MAX: int = 3
 FETCH_RETRY_BACKOFF_BASE: float = 2.0          # exponential: base ** attempt 초
 FETCH_TIMEOUT_SECONDS: float = 30.0
+
+# 일봉 OHLCV 첫 풀 수집 기간 (이후엔 종목별 마지막 일자 다음날부터 증분)
+# 분석은 ~200일이면 충분하지만 백테스트를 위해 더 긴 히스토리 보존
+OHLCV_LOOKBACK_DAYS: int = 365 * 3
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +121,8 @@ KIS_APP_SECRET: str = os.getenv("KIS_APP_SECRET", "")
 # OAuth access_token 파일 캐시 (24h 만료, 재발급은 1시간당 1회 제한 → 캐싱 필수)
 KIS_TOKEN_CACHE_PATH: Path = BASE_DIR / "data" / ".kis_token.json"
 
-# 호출 간격 (초). KIS 시세조회는 보통 초당 ~20건 허용 → 0.05초 보수적.
-KIS_RATE_LIMIT_SECONDS: float = 0.05
+# 호출 간격 (초). KIS 서버 500 에러 회피를 위해 보수적으로 0.2 (초당 5건).
+KIS_RATE_LIMIT_SECONDS: float = 0.2
 
 # 일봉 차트 한 번 호출당 최대 영업일 수 (KIS API 제약)
 KIS_DAILY_CHUNK_DAYS: int = 100

@@ -209,12 +209,14 @@ def fetch_kospi200_constituents() -> pd.DataFrame:
         1. ``KOSPI200섹터업종`` 컬럼이 1자리 영숫자이고 ``"0"`` 이 아닌 행.
            KIS 마스터의 sector 코드는 ``"1"``~``"9"`` 외에 ``"A"``, ``"B"`` 도
            포함되며 (총 11개 섹터 — 16진수 표기 추정), ``"0"`` 은 비멤버.
-        2. 단축코드가 6자리 숫자인 일반 주식.
-           (KOSPI 마스터에는 ETF/ETN/RP 등 7~9자리 코드 종목도 포함되므로 제외)
+        2. 단축코드 길이가 6 (영숫자 허용).
+           일반 보통주는 6자리 숫자(예: ``"005930"``), 분할/합병 후 임시 코드는
+           영문이 섞일 수 있다(예: ``"0126Z0"`` 삼성에피스홀딩스).
+           ETF/ETN/RP 등은 7~9자리라 자동 제외.
 
     Returns:
         columns = [ticker, name, sector]
-            - ``ticker`` : 6자리 단축코드
+            - ``ticker`` : 6자리 단축코드 (영숫자 허용)
             - ``name``   : 한글명
             - ``sector`` : KOSPI200 섹터 코드 (``"1"``~``"9"``, ``"A"``, ``"B"``)
 
@@ -231,8 +233,10 @@ def fetch_kospi200_constituents() -> pd.DataFrame:
 
     # KOSPI200 sector 코드는 1자리 영숫자 ("0" = 비멤버)
     is_kospi200_sector = (sector.str.len() == 1) & (sector != "0")
-    is_six_digit = (ticker.str.len() == 6) & ticker.str.isdigit()
-    is_member = is_kospi200_sector & is_six_digit
+    # ticker 는 6자리 영숫자 (분할/합병 후 임시 코드는 영문 포함 — 0126Z0 등).
+    # 7~9자리는 ETF/ETN/RP 라 자동 제외.
+    is_six_char = ticker.str.len() == 6
+    is_member = is_kospi200_sector & is_six_char
 
     constituents = df[is_member]
 

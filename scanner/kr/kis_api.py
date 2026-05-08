@@ -284,6 +284,8 @@ def fetch_daily_chart(
     if start > end:
         return pd.DataFrame()
 
+    # 청크 1개라도 실패하면 raise — 종목 전체 실패로 처리되어 다음 실행 시 재시도.
+    # 부분 데이터 (중간 100일 누락) 가 DB 에 들어가는 것을 방지.
     chunks: list[pd.DataFrame] = []
     chunk_start = start
     while chunk_start <= end:
@@ -291,20 +293,9 @@ def fetch_daily_chart(
             chunk_start + timedelta(days=KIS_DAILY_CHUNK_DAYS - 1),
             end,
         )
-        try:
-            df = _fetch_daily_chunk(
-                ticker, chunk_start, chunk_end, period_div_code, adjusted_price
-            )
-        except Exception as exc:
-            logger.error(
-                "KIS 일봉 청크 실패 {}: {} ~ {}: {}",
-                ticker,
-                chunk_start,
-                chunk_end,
-                exc,
-            )
-            df = pd.DataFrame()
-
+        df = _fetch_daily_chunk(
+            ticker, chunk_start, chunk_end, period_div_code, adjusted_price
+        )
         if not df.empty:
             chunks.append(df)
         chunk_start = chunk_end + timedelta(days=1)
