@@ -64,7 +64,7 @@ def run_daily_pipeline(
 
     # ── 2. 데이터 fetch ───────────────────────────────────────────
     if not skip_fetch:
-        from scanner.data.pipeline import run_data_pipeline
+        from scanner.data_pipeline import run_data_pipeline
 
         logger.info("OHLCV + 재무 fetch 시작")
         end_date = date.today()
