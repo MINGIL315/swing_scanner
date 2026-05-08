@@ -34,7 +34,7 @@ def update_universe(
 ) -> None:
     """종목 유니버스를 최신 구성종목으로 갱신한다.
 
-    kr  → KOSPI200 (pykrx)\n
+    kr  → KOSPI200 (KIS 공개 종목 마스터 파일)\n
     us  → S&P500   (Wikipedia)\n
     all → 둘 다
     """
