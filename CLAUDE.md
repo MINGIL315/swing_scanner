@@ -47,12 +47,21 @@ swing-scanner/
 ├── scanner/
 │   ├── __init__.py
 │   ├── config.py                  # 전역 설정 + 임계값 상수
-│   ├── data/__init__.py           # pykrx, yfinance 어댑터
+│   ├── data/                      # 데이터 수집 계층 — 시장별 분리
+│   │   ├── __init__.py
+│   │   ├── pipeline.py            # 통합 fetch 파이프라인
+│   │   ├── universe.py            # 공용 DB 헬퍼 (get_active_tickers 등)
+│   │   ├── kr/                    # 🇰🇷 한국 (pykrx → 추후 KRX OpenAPI)
+│   │   │   ├── fetcher.py         # KOSPI/KOSDAQ OHLCV·재무
+│   │   │   └── universe.py        # KOSPI200 구성종목 갱신
+│   │   └── us/                    # 🇺🇸 미국 (yfinance)
+│   │       ├── fetcher.py         # NYSE/NASDAQ OHLCV·재무
+│   │       └── universe.py        # S&P500 구성종목 갱신
 │   ├── db/__init__.py             # SQLAlchemy 모델·세션
-│   ├── indicators/__init__.py     # MA, RSI, 볼린저 등
-│   ├── patterns/__init__.py       # 4가지 패턴 탐지기
-│   ├── scoring/__init__.py        # 신뢰도 점수
-│   ├── filtering/__init__.py      # 거래량·재무 필터
+│   ├── indicators/__init__.py     # MA, RSI, 볼린저 등 (시장 무관)
+│   ├── patterns/__init__.py       # 4가지 패턴 탐지기 (시장 무관)
+│   ├── scoring/__init__.py        # 신뢰도 점수 (시장 무관)
+│   ├── filtering/__init__.py      # 거래량·재무 필터 (임계값만 시장별)
 │   ├── backtest/__init__.py       # 백테스트 엔진
 │   ├── reports/                   # HTML/Excel/CSV 리포트
 │   │   ├── __init__.py
@@ -65,10 +74,16 @@ swing-scanner/
 ├── data/                          # SQLite DB + 캐시 (gitignore)
 ├── logs/                          # 로그 파일 (gitignore)
 ├── scripts/                       # 일회성 유틸 스크립트
+├── pykrx_api/                     # KRX OpenAPI 명세 PDF (gitignore — 저작권)
 └── tests/
     ├── __init__.py
-    └── fixtures/                  # 테스트 픽스처
+    ├── fixtures/                  # 테스트 픽스처
+    └── data/                      # scanner/data/ 미러링
+        ├── kr/test_fetcher.py     # 한국 fetcher 테스트
+        └── us/test_fetcher.py     # 미국 fetcher 테스트
 ```
+
+> **시장 분리 정책**: 폴더명 `kr` = Korea(한국), `us` = USA(미국). 데이터 수집은 시장별 데이터 소스/인증/캐싱이 완전히 다르므로(pykrx vs yfinance) **`scanner/data/`** 와 **`tests/data/`** 만 분리한다. 나머지(`patterns/`, `indicators/`, `scoring/`, `filtering/`)는 시장 무관 알고리즘이라 통합 — 시장별 임계값(예: 거래대금 50억 vs 5천만 USD)은 함수 인자로 분기.
 
 ## 5. 4가지 패턴 정의
 
