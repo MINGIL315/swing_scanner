@@ -1,13 +1,10 @@
 """재무 필터 단위 테스트."""
 from __future__ import annotations
 
-import pytest
-
 from scanner.config import (
     MAX_DEBT_RATIO_KR,
     MIN_MARKET_CAP_KRW,
     MIN_MARKET_CAP_USD,
-    MIN_PER,
 )
 from scanner.us.filtering.fundamental_filter import passes_fundamental_filter
 
@@ -19,7 +16,6 @@ from scanner.us.filtering.fundamental_filter import passes_fundamental_filter
 class TestFundamentalFilterKR:
     _valid = {
         "market_cap": MIN_MARKET_CAP_KRW + 1e10,
-        "per": 12.5,
         "debt_ratio": 80.0,
     }
 
@@ -32,24 +28,6 @@ class TestFundamentalFilterKR:
         passed, details = passes_fundamental_filter("TEST", "KR", f)
         assert passed is False
         assert details["ok_market_cap"] is False
-
-    def test_fails_negative_per(self) -> None:
-        f = {**self._valid, "per": -5.0}
-        passed, details = passes_fundamental_filter("TEST", "KR", f)
-        assert passed is False
-        assert details["ok_per"] is False
-
-    def test_fails_zero_per(self) -> None:
-        f = {**self._valid, "per": 0.0}
-        passed, details = passes_fundamental_filter("TEST", "KR", f)
-        assert passed is False
-        assert details["ok_per"] is False
-
-    def test_fails_none_per(self) -> None:
-        f = {**self._valid, "per": None}
-        passed, details = passes_fundamental_filter("TEST", "KR", f)
-        assert passed is False
-        assert details["ok_per"] is False
 
     def test_fails_high_debt_ratio(self) -> None:
         f = {**self._valid, "debt_ratio": MAX_DEBT_RATIO_KR + 1.0}
@@ -70,8 +48,9 @@ class TestFundamentalFilterKR:
 
     def test_details_contains_kr_keys(self) -> None:
         _, details = passes_fundamental_filter("TEST", "KR", self._valid)
-        for key in ("ok_market_cap", "ok_per", "ok_debt_ratio", "passed"):
+        for key in ("ok_market_cap", "ok_debt_ratio", "passed"):
             assert key in details
+        assert "ok_per" not in details
 
     def test_exact_market_cap_boundary(self) -> None:
         """시가총액이 정확히 임계값이면 통과."""
@@ -91,8 +70,7 @@ class TestFundamentalFilterKR:
 class TestFundamentalFilterUS:
     _valid = {
         "market_cap": MIN_MARKET_CAP_USD + 1e8,
-        "per": 20.0,
-        "debt_ratio": 150.0,  # US는 부채비율 조건 없음
+        "debt_ratio": 150.0,  # US 는 부채비율 조건 없음 — 무시됨
     }
 
     def test_passes_all_valid(self) -> None:
@@ -105,24 +83,19 @@ class TestFundamentalFilterUS:
         assert passed is False
         assert details["ok_market_cap"] is False
 
-    def test_fails_negative_per(self) -> None:
-        f = {**self._valid, "per": -10.0}
-        passed, details = passes_fundamental_filter("TEST", "US", f)
-        assert passed is False
-        assert details["ok_per"] is False
-
     def test_high_debt_ratio_passes_us(self) -> None:
-        """US는 부채비율 조건이 없으므로 200% 초과도 통과."""
+        """US 는 부채비율 조건이 없으므로 어떤 값이어도 통과."""
         f = {**self._valid, "debt_ratio": 500.0}
         passed, _ = passes_fundamental_filter("TEST", "US", f)
         assert passed is True
 
     def test_details_has_no_debt_ratio_key(self) -> None:
-        """US details에는 ok_debt_ratio 키가 없다."""
+        """US details 에는 ok_debt_ratio 키가 없다."""
         _, details = passes_fundamental_filter("TEST", "US", self._valid)
         assert "ok_debt_ratio" not in details
 
     def test_details_contains_us_keys(self) -> None:
         _, details = passes_fundamental_filter("TEST", "US", self._valid)
-        for key in ("ok_market_cap", "ok_per", "passed"):
+        for key in ("ok_market_cap", "passed"):
             assert key in details
+        assert "ok_per" not in details
