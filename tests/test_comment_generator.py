@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from scanner.kr.reports.comment_generator import generate_comment
+from scanner.us.reports.comment_generator import generate_comment
 
 
 def _row(

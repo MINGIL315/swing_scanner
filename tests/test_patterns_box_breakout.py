@@ -32,21 +32,21 @@ def no_signal_df() -> pd.DataFrame:
 class TestBoxBreakoutDetect:
     def test_pattern_detected(self, detected_df: pd.DataFrame) -> None:
         """박스권 돌파 픽스처에서 패턴이 탐지된다."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         result = BoxBreakoutDetector().detect(detected_df, "TEST")
         assert result is not None
 
     def test_no_pattern_on_trend(self, no_signal_df: pd.DataFrame) -> None:
         """추세 상승 데이터에서는 패턴이 탐지되지 않는다."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         result = BoxBreakoutDetector().detect(no_signal_df, "TEST")
         assert result is None
 
     def test_result_fields(self, detected_df: pd.DataFrame) -> None:
         """PatternResult 모든 필드가 유효 범위에 있다."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         result = BoxBreakoutDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -57,7 +57,7 @@ class TestBoxBreakoutDetect:
 
     def test_box_range_within_threshold(self, detected_df: pd.DataFrame) -> None:
         """박스 폭이 10% 이내."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
         from scanner.config import BOX_BREAKOUT_RANGE_PCT
 
         result = BoxBreakoutDetector().detect(detected_df, "TEST")
@@ -66,7 +66,7 @@ class TestBoxBreakoutDetect:
 
     def test_vol_ratio_above_threshold(self, detected_df: pd.DataFrame) -> None:
         """돌파일 거래량 비율이 1.5 이상."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
         from scanner.config import BOX_BREAKOUT_VOLUME_RATIO
 
         result = BoxBreakoutDetector().detect(detected_df, "TEST")
@@ -75,7 +75,7 @@ class TestBoxBreakoutDetect:
 
     def test_insufficient_data_returns_none(self) -> None:
         """데이터 부족 시 None."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         df = pd.DataFrame(
             {"open": [100.0] * 50, "high": [101.0] * 50,
@@ -85,7 +85,7 @@ class TestBoxBreakoutDetect:
 
     def test_wide_range_returns_none(self) -> None:
         """박스 폭이 10% 초과이면 None."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         rng = np.random.default_rng(10)
         n = 70
@@ -102,7 +102,7 @@ class TestBoxBreakoutDetect:
 
     def test_no_breakout_returns_none(self) -> None:
         """박스권은 형성되나 돌파가 없으면 None."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         rng = np.random.default_rng(20)
         n = 70
@@ -119,7 +119,7 @@ class TestBoxBreakoutDetect:
 
     def test_low_volume_at_breakout_returns_none(self) -> None:
         """돌파 거래량 비율이 1.5 미만이면 None."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         df = pd.read_csv(
             str(FIXTURE_DIR / "box_breakout_detected.csv"), parse_dates=["date"]
@@ -134,14 +134,14 @@ class TestBoxBreakoutDetect:
 class TestBoxBreakoutEntrySignal:
     def test_entry_signal_returns_valid_strength(self, detected_df: pd.DataFrame) -> None:
         """entry_signal strength는 0~100 범위."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         sig = BoxBreakoutDetector().entry_signal(detected_df)
         assert 0.0 <= sig.strength <= 100.0
 
     def test_entry_signal_has_four_components(self, detected_df: pd.DataFrame) -> None:
         """신호 컴포넌트가 4개."""
-        from scanner.kr.patterns.box_breakout import BoxBreakoutDetector
+        from scanner.us.patterns.box_breakout import BoxBreakoutDetector
 
         sig = BoxBreakoutDetector().entry_signal(detected_df)
         assert len(sig.signals) == 4

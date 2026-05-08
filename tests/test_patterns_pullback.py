@@ -32,21 +32,21 @@ def no_signal_df() -> pd.DataFrame:
 class TestPullbackDetect:
     def test_pattern_detected(self, detected_df: pd.DataFrame) -> None:
         """눌림목 픽스처에서 패턴이 탐지된다."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         result = PullbackDetector().detect(detected_df, "TEST")
         assert result is not None
 
     def test_no_pattern_on_downtrend(self, no_signal_df: pd.DataFrame) -> None:
         """하락 추세에서는 패턴이 탐지되지 않는다."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         result = PullbackDetector().detect(no_signal_df, "TEST")
         assert result is None
 
     def test_result_fields(self, detected_df: pd.DataFrame) -> None:
         """PatternResult 모든 필드가 유효 범위에 있다."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         result = PullbackDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -57,7 +57,7 @@ class TestPullbackDetect:
 
     def test_weekly_trend_is_uptrend(self, detected_df: pd.DataFrame) -> None:
         """탐지된 결과의 주봉 추세가 uptrend이다."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         result = PullbackDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -65,7 +65,7 @@ class TestPullbackDetect:
 
     def test_ma_alignment(self, detected_df: pd.DataFrame) -> None:
         """MA 정배열: MA5 > MA20 > MA60."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         result = PullbackDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -74,7 +74,7 @@ class TestPullbackDetect:
 
     def test_price_near_ma(self, detected_df: pd.DataFrame) -> None:
         """현재가가 MA20 또는 MA60 근처에 위치."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         result = PullbackDetector().detect(detected_df, "TEST")
         assert result is not None
@@ -82,7 +82,7 @@ class TestPullbackDetect:
 
     def test_insufficient_data_returns_none(self) -> None:
         """데이터 부족 시 None."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         df = pd.DataFrame(
             {"open": [100.0] * 200, "high": [101.0] * 200,
@@ -92,7 +92,7 @@ class TestPullbackDetect:
 
     def test_bearish_candle_returns_none(self) -> None:
         """마지막 봉이 음봉이면 None."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         df = pd.read_csv(
             str(FIXTURE_DIR / "pullback_detected.csv"), parse_dates=["date"]
@@ -105,7 +105,7 @@ class TestPullbackDetect:
 
     def test_low_volume_returns_none(self) -> None:
         """거래량 부족 시 None."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         df = pd.read_csv(
             str(FIXTURE_DIR / "pullback_detected.csv"), parse_dates=["date"]
@@ -118,7 +118,7 @@ class TestPullbackDetect:
 
     def test_no_ma_alignment_returns_none(self) -> None:
         """MA 역배열 데이터에서 None."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         rng = np.random.default_rng(13)
         n = 450
@@ -144,14 +144,14 @@ class TestPullbackDetect:
 class TestPullbackEntrySignal:
     def test_entry_signal_returns_valid_strength(self, detected_df: pd.DataFrame) -> None:
         """entry_signal strength는 0~100 범위."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         sig = PullbackDetector().entry_signal(detected_df)
         assert 0.0 <= sig.strength <= 100.0
 
     def test_entry_signal_has_four_components(self, detected_df: pd.DataFrame) -> None:
         """신호 컴포넌트가 4개."""
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
 
         sig = PullbackDetector().entry_signal(detected_df)
         assert len(sig.signals) == 4

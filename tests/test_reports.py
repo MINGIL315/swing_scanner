@@ -58,7 +58,7 @@ def _noop_session():
 class TestHtmlReport:
     def test_generate_creates_index(self, tmp_path: Path) -> None:
         """generate_daily_report 가 index.html 을 생성한다."""
-        from scanner.kr.reports.html_report import generate_daily_report
+        from scanner.us.reports.html_report import generate_daily_report
 
         orm_rows = [_make_scan_row("A", "pullback", 80.0)]
 
@@ -108,7 +108,7 @@ class TestHtmlReport:
 
     def test_generate_creates_pattern_list_pages(self, tmp_path: Path) -> None:
         """4개 패턴 HTML 파일이 생성된다."""
-        from scanner.kr.reports.html_report import generate_daily_report, _PATTERN_KEYS
+        from scanner.us.reports.html_report import generate_daily_report, _PATTERN_KEYS
 
         with (
             patch("scanner.reports.html_report.settings") as mock_settings,
@@ -128,7 +128,7 @@ class TestHtmlReport:
 
     def test_stock_detail_created_for_each_ticker(self, tmp_path: Path) -> None:
         """종목 수만큼 stocks/{ticker}.html 이 생성된다."""
-        from scanner.kr.reports.html_report import generate_daily_report
+        from scanner.us.reports.html_report import generate_daily_report
 
         rows_dict = [
             {
@@ -184,7 +184,7 @@ class TestHtmlReport:
 
 class TestBuildOhlcvJson:
     def test_empty_df_returns_empty_lists(self) -> None:
-        from scanner.kr.reports.html_report import _build_ohlcv_json
+        from scanner.us.reports.html_report import _build_ohlcv_json
 
         result = json.loads(_build_ohlcv_json(pd.DataFrame()))
         assert result["candles"] == []
@@ -193,7 +193,7 @@ class TestBuildOhlcvJson:
         assert result["rsi"] == []
 
     def test_valid_df_produces_candles(self) -> None:
-        from scanner.kr.reports.html_report import _build_ohlcv_json
+        from scanner.us.reports.html_report import _build_ohlcv_json
 
         df = pd.DataFrame([
             {"date": f"2026-01-{i+1:02d}", "open": 100.0, "high": 105.0,
@@ -207,7 +207,7 @@ class TestBuildOhlcvJson:
         assert "open" in result["candles"][0]
 
     def test_volume_color_logic(self) -> None:
-        from scanner.kr.reports.html_report import _build_ohlcv_json
+        from scanner.us.reports.html_report import _build_ohlcv_json
 
         df = pd.DataFrame([
             {"date": "2026-01-01", "open": 100.0, "high": 105.0, "low": 99.0,
@@ -221,7 +221,7 @@ class TestBuildOhlcvJson:
         assert result["volume"][1]["color"] == "#f85149"
 
     def test_ma5_starts_after_5_rows(self) -> None:
-        from scanner.kr.reports.html_report import _build_ohlcv_json
+        from scanner.us.reports.html_report import _build_ohlcv_json
 
         df = pd.DataFrame([
             {"date": f"2026-01-{i+1:02d}", "open": 100.0, "high": 105.0,
@@ -241,7 +241,7 @@ class TestBuildOhlcvJson:
 
 class TestExportToCsv:
     def test_csv_created(self, tmp_path: Path) -> None:
-        from scanner.kr.reports.excel_export import export_to_csv
+        from scanner.us.reports.excel_export import export_to_csv
 
         df = pd.DataFrame([{
             "scan_date": "2026-01-15",
@@ -272,7 +272,7 @@ class TestExportToCsv:
         assert loaded.iloc[0]["ticker"] == "A"
 
     def test_csv_has_all_required_columns(self, tmp_path: Path) -> None:
-        from scanner.kr.reports.excel_export import export_to_csv, _COLUMNS
+        from scanner.us.reports.excel_export import export_to_csv, _COLUMNS
 
         empty_df = pd.DataFrame(columns=_COLUMNS)
         with (
@@ -290,7 +290,7 @@ class TestExportToCsv:
 
 class TestExportToExcel:
     def test_excel_created(self, tmp_path: Path) -> None:
-        from scanner.kr.reports.excel_export import export_to_excel, _COLUMNS
+        from scanner.us.reports.excel_export import export_to_excel, _COLUMNS
 
         df = pd.DataFrame([{
             "scan_date": "2026-01-15",
@@ -319,7 +319,7 @@ class TestExportToExcel:
 
     def test_excel_has_six_sheets(self, tmp_path: Path) -> None:
         from openpyxl import load_workbook
-        from scanner.kr.reports.excel_export import export_to_excel, _COLUMNS
+        from scanner.us.reports.excel_export import export_to_excel, _COLUMNS
 
         empty_df = pd.DataFrame(columns=_COLUMNS)
         with (

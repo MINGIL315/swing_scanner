@@ -9,7 +9,7 @@ from scanner.config import (
     MIN_MARKET_CAP_USD,
     MIN_PER,
 )
-from scanner.kr.filtering.fundamental_filter import passes_fundamental_filter
+from scanner.us.filtering.fundamental_filter import passes_fundamental_filter
 
 
 # ---------------------------------------------------------------------------

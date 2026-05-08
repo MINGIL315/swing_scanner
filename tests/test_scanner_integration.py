@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from scanner.config import MIN_AVG_TRADING_VALUE_KRW
 from scanner.db.models import Base
 from scanner.db.repository import get_scan_results, save_scan_results
-from scanner.kr.scanner import TickerScanResult, analyze_ticker, scan_universe
+from scanner.us.scanner import TickerScanResult, analyze_ticker, scan_universe
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
