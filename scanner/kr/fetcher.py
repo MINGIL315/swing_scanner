@@ -12,7 +12,7 @@
     fetch_daily       : 일봉 OHLCV
     fetch_weekly      : 주봉 OHLCV (일봉 리샘플)
     fetch_intraday    : 60분봉 OHLCV (placeholder — 운영 미사용)
-    fetch_fundamental : PER/PBR/ROE 단일 스냅샷
+    fetch_fundamental : 부채비율 + ROE 단일 스냅샷 (KIS 재무비율 API)
 """
 from __future__ import annotations
 
@@ -133,19 +133,21 @@ def fetch_intraday(
 
 
 def fetch_fundamental(ticker: str) -> pd.DataFrame:
-    """KIS 재무비율의 최신 결산 1행을 반환한다.
+    """KIS 재무비율의 최신 결산 1행을 단일 스냅샷으로 반환한다.
 
-    옛 pykrx 의 ``(ticker, start, end)`` 일별 시리즈 → US 와 동일한 단일 스냅샷
-    형태로 변경. ``date`` 는 호출 시점(today). DB 의 ``Fundamental`` 모델
-    컬럼만 추려 반환한다 (eps/bps 는 모델에 없어 제거).
+    KIS API 응답에서 분석에 사용하는 두 지표만 추출:
+        - ``debt_ratio`` (부채비율) — KR 재무 필터의 ``< 200%`` 조건
+        - ``roe``        — 분석 미사용이지만 DB 모델에 컬럼 존재, 기록용
+
+    PER/PBR 은 KIS 재무비율 API 응답에 없고 분석에서도 사용하지 않으므로
+    수집하지 않는다 (PER 적자 컷 필터는 폐기됨 — 2026-05-08).
 
     Args:
         ticker: 6자리 종목코드.
 
     Returns:
-        columns = [ticker, date, per, pbr, roe]
-        실패/빈 결과 시 빈 DataFrame. KIS 응답에 부채비율(``debt_ratio``)이
-        없어 컬럼은 포함되지 않는다 (DB 측은 nullable).
+        columns = [ticker, date, debt_ratio, roe]
+        실패/빈 결과 시 빈 DataFrame.
     """
     logger.debug("KR fundamental fetch: {}", ticker)
     df = kis_api.fetch_financial_ratio(ticker, annual=True)
@@ -153,5 +155,5 @@ def fetch_fundamental(ticker: str) -> pd.DataFrame:
         logger.warning("KR fundamental 빈 결과: {}", ticker)
         return df
 
-    keep = [c for c in ("ticker", "date", "per", "pbr", "roe") if c in df.columns]
+    keep = [c for c in ("ticker", "date", "debt_ratio", "roe") if c in df.columns]
     return df[keep]
