@@ -246,7 +246,7 @@ def _load_fundamentals(
         tickers: 조회할 티커 목록.
 
     Returns:
-        ticker → {"market_cap", "per", "debt_ratio"} 딕셔너리.
+        ticker → {"market_cap", "debt_ratio"} 딕셔너리.
     """
     with get_session() as session:
         # 시가총액 (Universe 테이블)
@@ -282,7 +282,6 @@ def _load_fundamentals(
     return {
         ticker: {
             "market_cap": market_caps.get(ticker),
-            "per": fund_map[ticker].per if ticker in fund_map else None,
             "debt_ratio": fund_map[ticker].debt_ratio if ticker in fund_map else None,
         }
         for ticker in tickers

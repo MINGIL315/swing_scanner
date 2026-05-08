@@ -84,7 +84,6 @@ RECENT_VOLUME_LOOKBACK_DAYS: int = 5                    # 최근 N일 평균 거
 
 MIN_MARKET_CAP_KRW: float = 100_000_000_000   # 시가총액 1000억원
 MIN_MARKET_CAP_USD: float = 1_000_000_000     # 시가총액 10억 USD
-MIN_PER: float = 0.0                          # PER > 0 (적자 제외)
 MAX_DEBT_RATIO_KR: float = 200.0              # 부채비율 < 200%
 
 
