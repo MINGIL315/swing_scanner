@@ -31,7 +31,7 @@ from rich.progress import (
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from scanner.config import FETCH_MAX_WORKERS, settings
+from scanner.config import FETCH_MAX_WORKERS, OHLCV_LOOKBACK_DAYS, settings
 from scanner.kr import fetcher as kr_fetcher
 from scanner.us import fetcher as us_fetcher
 from scanner.db.universe_db import get_active_tickers
@@ -211,7 +211,7 @@ def fetch_all_ohlcv(
     """
     today = date.today()
     end = end or today
-    start = start or (today - timedelta(days=365))
+    start = start or (today - timedelta(days=OHLCV_LOOKBACK_DAYS))
 
     tickers = get_active_tickers(market)  # type: ignore[arg-type]
     if not tickers:

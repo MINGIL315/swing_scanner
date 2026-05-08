@@ -12,7 +12,12 @@ import pandas as pd
 from loguru import logger
 from sqlalchemy import and_, func, select
 
-from scanner.config import CONFIDENCE_THRESHOLD, FETCH_MAX_WORKERS, settings
+from scanner.config import (
+    CONFIDENCE_THRESHOLD,
+    FETCH_MAX_WORKERS,
+    OHLCV_LOOKBACK_DAYS,
+    settings,
+)
 from scanner.db.universe_db import get_active_tickers
 from scanner.db.models import Fundamental, OHLCVDaily, ScanResult, Universe
 from scanner.db.repository import get_scan_results, save_scan_results
@@ -68,7 +73,7 @@ def run_daily_pipeline(
 
         logger.info("OHLCV + 재무 fetch 시작")
         end_date = date.today()
-        start_date = end_date - timedelta(days=365)
+        start_date = end_date - timedelta(days=OHLCV_LOOKBACK_DAYS)
         run_data_pipeline(market=market, start=start_date, end=end_date)
         logger.info("데이터 fetch 완료")
 
@@ -246,7 +251,7 @@ def _load_fundamentals(
         tickers: 조회할 티커 목록.
 
     Returns:
-        ticker → {"market_cap", "debt_ratio"} 딕셔너리.
+        ticker → {"market_cap"} 딕셔너리.
     """
     with get_session() as session:
         # 시가총액 (Universe 테이블)
@@ -280,10 +285,7 @@ def _load_fundamentals(
         fund_map: dict[str, Fundamental] = {row.ticker: row for row in fund_rows}
 
     return {
-        ticker: {
-            "market_cap": market_caps.get(ticker),
-            "debt_ratio": fund_map[ticker].debt_ratio if ticker in fund_map else None,
-        }
+        ticker: {"market_cap": market_caps.get(ticker)}
         for ticker in tickers
     }
 
