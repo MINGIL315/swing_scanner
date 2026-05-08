@@ -62,7 +62,7 @@ def analyze_ticker(
         ticker      : 종목 코드.
         market      : "KR" 또는 "US".
         daily_df    : 일봉 OHLCV DataFrame (최신 행이 마지막).
-        fundamentals: {'market_cap', 'per', 'debt_ratio'} 딕셔너리.
+        fundamentals: {'market_cap', 'debt_ratio'} 딕셔너리.
                       None 이면 재무 필터를 건너뛴다 (passed_fundamental=False).
 
     Returns:
