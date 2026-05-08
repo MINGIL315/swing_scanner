@@ -248,7 +248,7 @@ class TestFetchDailyChart:
 
 class TestFetchFinancialRatio:
     def test_returns_latest_row_normalized(self, monkeypatch):
-        """output 배열의 첫 행 (최신 결산) 만 정규화하여 1행 반환."""
+        """output 첫 행에서 lblt_rate→debt_ratio, roe_val→roe 만 추출한다."""
         _seed_token_cache()
         mock_request = MagicMock(
             return_value=_make_response(
@@ -256,21 +256,24 @@ class TestFetchFinancialRatio:
                     "rt_cd": "0",
                     "msg1": "정상",
                     "output": [
+                        # 가장 최근 결산 (실제 KIS 응답 형태)
+                        {
+                            "stac_yymm": "202512",
+                            "grs": "10.88",
+                            "bsop_prfi_inrt": "33.23",
+                            "ntin_inrt": "31.22",
+                            "roe_val": "10.85",
+                            "eps": "6564.00",
+                            "sps": "49471",
+                            "bps": "63997.00",
+                            "rsrv_rate": "45296.17",
+                            "lblt_rate": "29.94",
+                        },
+                        # 더 오래된 결산 (무시됨)
                         {
                             "stac_yymm": "202412",
-                            "per": "12.5",
-                            "pbr": "1.3",
-                            "roe_val": "10.4",
-                            "eps": "5000",
-                            "bps": "50000",
-                        },
-                        {
-                            "stac_yymm": "202312",
-                            "per": "11.0",
-                            "pbr": "1.2",
                             "roe_val": "9.0",
-                            "eps": "4500",
-                            "bps": "45000",
+                            "lblt_rate": "31.0",
                         },
                     ],
                 }
@@ -283,12 +286,11 @@ class TestFetchFinancialRatio:
         assert len(df) == 1
         row = df.iloc[0]
         assert row["ticker"] == "005930"
-        assert row["stac_yymm"] == "202412"
-        assert row["per"] == 12.5
-        assert row["pbr"] == 1.3
-        assert row["roe"] == 10.4
-        assert row["eps"] == 5000.0
-        assert row["bps"] == 50000.0
+        assert row["debt_ratio"] == 29.94
+        assert row["roe"] == 10.85
+        # 미수집 필드는 컬럼에 없음
+        for col in ("per", "pbr", "stac_yymm", "eps", "bps"):
+            assert col not in df.columns
 
     def test_returns_empty_when_no_output(self, monkeypatch):
         """output 가 빈 배열이면 빈 DataFrame."""

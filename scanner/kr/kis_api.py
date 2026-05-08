@@ -331,14 +331,21 @@ _FINANCIAL_RATIO_TR = "FHKST66430300"
 
 
 def fetch_financial_ratio(ticker: str, annual: bool = True) -> pd.DataFrame:
-    """KIS 재무비율 (PER/PBR/ROE/EPS/BPS) 의 최신 결산 1행을 반환한다.
+    """KIS 재무비율의 최신 결산 1행에서 부채비율 + ROE 를 반환한다.
+
+    KIS API ``FHKST66430300`` 응답 필드 중 분석에 사용되는 두 항목만 추출한다:
+        - ``lblt_rate`` → ``debt_ratio`` (부채비율, %)
+        - ``roe_val``   → ``roe``        (자기자본수익률, %)
+
+    PER/PBR 은 이 API 응답에 없고 분석에서도 사용하지 않으므로 추출하지 않는다.
+    EPS/BPS/매출액증가율 등 그 외 필드도 분석 미사용이라 무시.
 
     Args:
         ticker : 6자리 종목코드.
         annual : True 면 연간(1), False 면 분기(0).
 
     Returns:
-        columns = [ticker, date, stac_yymm, per, pbr, roe, eps, bps]
+        columns = [ticker, date, debt_ratio, roe]
         ``date`` 는 호출 시점(today). 빈 결과 시 빈 DataFrame.
     """
     data = _request(
@@ -363,12 +370,8 @@ def fetch_financial_ratio(ticker: str, annual: bool = True) -> pd.DataFrame:
             {
                 "ticker": ticker,
                 "date": date.today(),
-                "stac_yymm": latest.get("stac_yymm", ""),
-                "per": _safe_float(latest.get("per")),
-                "pbr": _safe_float(latest.get("pbr")),
+                "debt_ratio": _safe_float(latest.get("lblt_rate")),
                 "roe": _safe_float(latest.get("roe_val")),
-                "eps": _safe_float(latest.get("eps")),
-                "bps": _safe_float(latest.get("bps")),
             }
         ]
     )
