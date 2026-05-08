@@ -205,13 +205,18 @@ def parse_kospi_master_dataframe(mst_path: Path) -> pd.DataFrame:
 def fetch_kospi200_constituents() -> pd.DataFrame:
     """KIS 마스터를 다운로드/파싱하여 KOSPI200 구성종목만 반환한다.
 
-    멤버십은 ``KOSPI200섹터업종`` 컬럼이 비어있지 않은 행으로 판정한다.
+    멤버십 판정 규칙:
+        1. ``KOSPI200섹터업종`` 컬럼이 1자리 영숫자이고 ``"0"`` 이 아닌 행.
+           KIS 마스터의 sector 코드는 ``"1"``~``"9"`` 외에 ``"A"``, ``"B"`` 도
+           포함되며 (총 11개 섹터 — 16진수 표기 추정), ``"0"`` 은 비멤버.
+        2. 단축코드가 6자리 숫자인 일반 주식.
+           (KOSPI 마스터에는 ETF/ETN/RP 등 7~9자리 코드 종목도 포함되므로 제외)
 
     Returns:
         columns = [ticker, name, sector]
-            - ``ticker`` : 6자리 단축코드 (str)
+            - ``ticker`` : 6자리 단축코드
             - ``name``   : 한글명
-            - ``sector`` : KOSPI200섹터업종 코드/이름
+            - ``sector`` : KOSPI200 섹터 코드 (``"1"``~``"9"``, ``"A"``, ``"B"``)
 
     Raises:
         httpx.HTTPError / RuntimeError : 다운로드 또는 파일 부재 시.
@@ -222,13 +227,19 @@ def fetch_kospi200_constituents() -> pd.DataFrame:
         df = parse_kospi_master_dataframe(mst_path)
 
     sector = df["KOSPI200섹터업종"].astype(str).str.strip()
-    is_kospi200 = sector.notna() & (sector != "") & (sector.str.lower() != "nan")
-    constituents = df[is_kospi200].copy()
+    ticker = df["단축코드"].astype(str).str.strip()
+
+    # KOSPI200 sector 코드는 1자리 영숫자 ("0" = 비멤버)
+    is_kospi200_sector = (sector.str.len() == 1) & (sector != "0")
+    is_six_digit = (ticker.str.len() == 6) & ticker.str.isdigit()
+    is_member = is_kospi200_sector & is_six_digit
+
+    constituents = df[is_member]
 
     result = pd.DataFrame({
-        "ticker": constituents["단축코드"].astype(str).str.strip(),
-        "name": constituents["한글명"].astype(str).str.strip(),
-        "sector": sector[is_kospi200].values,
+        "ticker": ticker[is_member].values,
+        "name": constituents["한글명"].astype(str).str.strip().values,
+        "sector": sector[is_member].values,
     })
 
     logger.info("KOSPI200 구성종목 {}종목 추출", len(result))
