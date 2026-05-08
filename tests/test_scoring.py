@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scanner.kr.patterns.base import PatternResult
-from scanner.kr.scoring.scorer import (
+from scanner.us.patterns.base import PatternResult
+from scanner.us.scoring.scorer import (
     ScoringInput,
     _ma_alignment_score,
     _rsi_score,
@@ -184,7 +184,7 @@ class TestCalculateConfidenceScore:
         """실제 눌림목 픽스처 데이터로 점수가 유효 범위에 있다."""
         df = pd.read_csv(str(FIXTURE_DIR / "pullback_detected.csv"), parse_dates=["date"])
         df["date"] = df["date"].dt.date
-        from scanner.kr.patterns.pullback import PullbackDetector
+        from scanner.us.patterns.pullback import PullbackDetector
         result = PullbackDetector().detect(df, "TEST")
         assert result is not None
         inp = ScoringInput(
