@@ -1,6 +1,6 @@
 """한국(KOSPI) 데이터 fetcher 단위 테스트.
 
-대상 모듈: scanner.data.kr.fetcher
+대상 모듈: scanner.kr.fetcher
 네트워크가 필요한 테스트에는 @pytest.mark.network 마커를 붙인다.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ class TestFetchDaily:
     @network
     def test_samsung_returns_dataframe(self) -> None:
         """삼성전자(005930) 일봉이 유효한 DataFrame을 반환한다."""
-        from scanner.data.kr.fetcher import fetch_daily
+        from scanner.kr.fetcher import fetch_daily
 
         start, end = _recent_range(30)
         df = fetch_daily("005930", start, end)
@@ -65,7 +65,7 @@ class TestFetchDaily:
     @network
     def test_date_range_is_respected(self) -> None:
         """반환된 데이터의 날짜가 요청 범위 안에 있다."""
-        from scanner.data.kr.fetcher import fetch_daily
+        from scanner.kr.fetcher import fetch_daily
 
         start, end = _recent_range(10)
         df = fetch_daily("005930", start, end)
@@ -77,7 +77,7 @@ class TestFetchDaily:
 
     def test_invalid_ticker_returns_empty(self) -> None:
         """존재하지 않는 티커는 빈 DataFrame을 반환한다 (네트워크 호출 포함)."""
-        from scanner.data.kr.fetcher import fetch_daily
+        from scanner.kr.fetcher import fetch_daily
 
         start, end = _recent_range(5)
         df = fetch_daily("INVALID_TICKER_XYZ", start, end)
@@ -93,7 +93,7 @@ class TestFetchWeekly:
     @network
     def test_samsung_weekly_columns(self) -> None:
         """삼성전자 주봉이 week_start_date 컬럼을 포함한다."""
-        from scanner.data.kr.fetcher import fetch_weekly
+        from scanner.kr.fetcher import fetch_weekly
 
         start, end = _recent_range(60)
         df = fetch_weekly("005930", start, end)
@@ -103,7 +103,7 @@ class TestFetchWeekly:
     @network
     def test_weekly_rows_less_than_daily(self) -> None:
         """주봉 행 수는 같은 기간 일봉 행 수보다 적다."""
-        from scanner.data.kr.fetcher import fetch_daily, fetch_weekly
+        from scanner.kr.fetcher import fetch_daily, fetch_weekly
 
         start, end = _recent_range(60)
         df_d = fetch_daily("005930", start, end)
@@ -122,7 +122,7 @@ class TestFetchFundamental:
     @network
     def test_samsung_fundamental_columns(self) -> None:
         """삼성전자 재무 데이터가 per/pbr 컬럼을 포함한다."""
-        from scanner.data.kr.fetcher import fetch_fundamental
+        from scanner.kr.fetcher import fetch_fundamental
 
         start, end = _recent_range(10)
         df = fetch_fundamental("005930", start, end)
@@ -133,7 +133,7 @@ class TestFetchFundamental:
 
     def test_empty_result_is_dataframe(self) -> None:
         """실패 시 빈 DataFrame(타입)을 반환한다."""
-        from scanner.data.kr.fetcher import fetch_fundamental
+        from scanner.kr.fetcher import fetch_fundamental
 
         start, end = _recent_range(5)
         df = fetch_fundamental("INVALID000", start, end)
@@ -148,7 +148,7 @@ class TestFetchFundamental:
 class TestFetchIntraday:
     def test_intraday_returns_dataframe_with_correct_columns(self) -> None:
         """60분봉 함수가 항상 올바른 컬럼을 가진 DataFrame을 반환한다 (현재 빈 결과)."""
-        from scanner.data.kr.fetcher import fetch_intraday
+        from scanner.kr.fetcher import fetch_intraday
 
         df = fetch_intraday("005930", date.today())
         assert isinstance(df, pd.DataFrame)

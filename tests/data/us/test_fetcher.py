@@ -1,6 +1,6 @@
 """미국(NYSE/NASDAQ) 데이터 fetcher 단위 테스트.
 
-대상 모듈: scanner.data.us.fetcher
+대상 모듈: scanner.us.fetcher
 네트워크가 필요한 테스트에는 @pytest.mark.network 마커를 붙인다.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ class TestFetchDaily:
     @network
     def test_aapl_returns_dataframe(self) -> None:
         """AAPL 일봉이 유효한 DataFrame을 반환한다."""
-        from scanner.data.us.fetcher import fetch_daily
+        from scanner.us.fetcher import fetch_daily
 
         start, end = _recent_range(30)
         df = fetch_daily("AAPL", start, end)
@@ -65,7 +65,7 @@ class TestFetchDaily:
     @network
     def test_date_range_is_respected(self) -> None:
         """반환된 데이터의 날짜가 요청 범위 안에 있다."""
-        from scanner.data.us.fetcher import fetch_daily
+        from scanner.us.fetcher import fetch_daily
 
         start, end = _recent_range(10)
         df = fetch_daily("AAPL", start, end)
@@ -77,7 +77,7 @@ class TestFetchDaily:
 
     def test_invalid_ticker_returns_empty(self) -> None:
         """존재하지 않는 티커는 빈 DataFrame을 반환한다."""
-        from scanner.data.us.fetcher import fetch_daily
+        from scanner.us.fetcher import fetch_daily
 
         start, end = _recent_range(5)
         df = fetch_daily("INVALID_TICKER_XYZ_999", start, end)
@@ -93,7 +93,7 @@ class TestFetchWeekly:
     @network
     def test_aapl_weekly_columns(self) -> None:
         """AAPL 주봉이 week_start_date 컬럼을 포함한다."""
-        from scanner.data.us.fetcher import fetch_weekly
+        from scanner.us.fetcher import fetch_weekly
 
         start, end = _recent_range(60)
         df = fetch_weekly("AAPL", start, end)
@@ -103,7 +103,7 @@ class TestFetchWeekly:
     @network
     def test_weekly_rows_less_than_daily(self) -> None:
         """주봉 행 수는 같은 기간 일봉 행 수보다 적다."""
-        from scanner.data.us.fetcher import fetch_daily, fetch_weekly
+        from scanner.us.fetcher import fetch_daily, fetch_weekly
 
         start, end = _recent_range(60)
         df_d = fetch_daily("AAPL", start, end)
@@ -122,7 +122,7 @@ class TestFetchIntraday:
     @network
     def test_aapl_intraday_columns(self) -> None:
         """AAPL 60분봉이 올바른 컬럼을 가진다."""
-        from scanner.data.us.fetcher import fetch_intraday
+        from scanner.us.fetcher import fetch_intraday
 
         # 최근 평일 (주말은 데이터 없음)
         today = date.today()
@@ -142,7 +142,7 @@ class TestFetchIntraday:
 
     def test_empty_result_is_dataframe(self) -> None:
         """미래 날짜 요청 시 빈 DataFrame을 반환한다."""
-        from scanner.data.us.fetcher import fetch_intraday
+        from scanner.us.fetcher import fetch_intraday
 
         future = date.today() + timedelta(days=30)
         df = fetch_intraday("AAPL", future)
@@ -158,7 +158,7 @@ class TestFetchFundamental:
     @network
     def test_aapl_fundamental_has_required_fields(self) -> None:
         """AAPL 재무 지표에 ticker/date/market_cap 이 있다."""
-        from scanner.data.us.fetcher import fetch_fundamental
+        from scanner.us.fetcher import fetch_fundamental
 
         df = fetch_fundamental("AAPL")
         if df.empty:
@@ -170,7 +170,7 @@ class TestFetchFundamental:
 
     def test_empty_result_is_dataframe(self) -> None:
         """실패 시 빈 DataFrame(타입)을 반환한다."""
-        from scanner.data.us.fetcher import fetch_fundamental
+        from scanner.us.fetcher import fetch_fundamental
 
         df = fetch_fundamental("INVALID_XYZ_999")
         assert isinstance(df, pd.DataFrame)

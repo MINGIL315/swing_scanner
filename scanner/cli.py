@@ -39,8 +39,8 @@ def update_universe(
     all → 둘 다
     """
     from scanner.config import setup_logger
-    from scanner.data.kr.universe import update_kospi200
-    from scanner.data.us.universe import update_sp500
+    from scanner.kr.universe import update_kospi200
+    from scanner.us.universe import update_sp500
     from scanner.db.migrations import init_database
 
     setup_logger()
@@ -67,7 +67,7 @@ def fetch(
     from datetime import date, timedelta
 
     from scanner.config import setup_logger
-    from scanner.data.pipeline import (
+    from scanner.data_pipeline import (
         _fetch_fundamental_one,
         _fetch_ohlcv_one,
         _get_market,
@@ -110,7 +110,7 @@ def fetch_all(
     from datetime import date, timedelta
 
     from scanner.config import setup_logger
-    from scanner.data.pipeline import run_data_pipeline
+    from scanner.data_pipeline import run_data_pipeline
     from scanner.db.migrations import init_database
 
     setup_logger()
@@ -138,7 +138,7 @@ def test_pattern(
     from rich.table import Table
 
     from scanner.config import setup_logger
-    from scanner.data.pipeline import _fetch_ohlcv_one, _get_market
+    from scanner.data_pipeline import _fetch_ohlcv_one, _get_market
     from scanner.db.migrations import init_database
     from scanner.db.session import get_session
     from scanner.db.models import OHLCVDaily
@@ -389,7 +389,7 @@ def scan(
     from rich.table import Table
 
     from scanner.config import FETCH_MAX_WORKERS, setup_logger
-    from scanner.data.universe import get_active_tickers
+    from scanner.db.universe_db import get_active_tickers
     from scanner.db.migrations import init_database
     from scanner.db.repository import get_scan_results, save_scan_results
     from scanner.db.session import get_session
@@ -434,7 +434,7 @@ def scan(
 
             if not skip_fetch:
                 progress.update(task1, description="[bold]데이터 fetch 중...[/bold]")
-                from scanner.data.pipeline import run_data_pipeline
+                from scanner.data_pipeline import run_data_pipeline
                 end_date = date.today()
                 start_date = end_date - timedelta(days=365)
                 run_data_pipeline(market=market_upper, start=start_date, end=end_date)
