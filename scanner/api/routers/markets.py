@@ -1,4 +1,4 @@
-"""GET /api/markets/summary 라우터."""
+"""GET /api/markets/summary, /api/markets/search 라우터."""
 from __future__ import annotations
 
 from datetime import date
@@ -9,6 +9,35 @@ from fastapi import APIRouter, Query
 from scanner.db.session import get_session
 
 router = APIRouter(tags=["markets"])
+
+
+@router.get("/markets/search")
+def search_universe(
+    q: str = Query(..., min_length=1, max_length=50, description="ticker 또는 한글명 부분 매치"),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict[str, Any]]:
+    """활성 Universe 에서 ticker 또는 name 부분 매치로 검색한다."""
+    from sqlalchemy import or_, select
+
+    from scanner.db.models import Universe
+
+    pattern = f"%{q}%"
+    with get_session() as session:
+        rows = session.execute(
+            select(Universe.ticker, Universe.name, Universe.market, Universe.market_cap)
+            .where(Universe.is_active.is_(True))
+            .where(or_(
+                Universe.ticker.ilike(pattern),
+                Universe.name.ilike(pattern),
+            ))
+            .order_by(Universe.market_cap.desc().nulls_last())
+            .limit(limit)
+        ).all()
+
+    return [
+        {"ticker": r.ticker, "name": r.name, "market": r.market, "market_cap": r.market_cap}
+        for r in rows
+    ]
 
 
 @router.get("/markets/summary")
