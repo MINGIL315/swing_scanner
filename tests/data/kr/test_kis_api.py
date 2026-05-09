@@ -352,3 +352,137 @@ class TestSafeFloat:
     def test_converts_or_returns_none(self, value, expected):
         """KIS 응답 문자열을 안전하게 float 또는 None 으로 변환한다."""
         assert kis_api._safe_float(value) == expected
+
+
+# ---------------------------------------------------------------------------
+# fetch_minute_chart_chunk (TR FHKST03010230)
+# ---------------------------------------------------------------------------
+
+
+def _sample_minute_response(rows: list[tuple[str, str, float, float, float, float, float]]) -> dict:
+    """KIS 일별 분봉 응답 더블.
+
+    rows: [(YYYYMMDD, HHMMSS, open, high, low, close, volume), ...]
+    명세 그대로 시간 역순(최신→과거) 으로 전달해야 함.
+    """
+    return {
+        "rt_cd": "0",
+        "msg_cd": "MCA00000",
+        "msg1": "정상처리되었습니다.",
+        "output1": {"hts_kor_isnm": "TEST", "stck_prpr": "100"},
+        "output2": [
+            {
+                "stck_bsop_date": d,
+                "stck_cntg_hour": h,
+                "stck_prpr": str(c),
+                "stck_oprc": str(o),
+                "stck_hgpr": str(hi),
+                "stck_lwpr": str(low),
+                "cntg_vol": str(int(v)),
+                "acml_tr_pbmn": "0",
+            }
+            for d, h, o, hi, low, c, v in rows
+        ],
+    }
+
+
+class TestFetchMinuteChartChunk:
+    def test_normalizes_and_sorts_ascending(self, monkeypatch):
+        """KIS 시간 역순 응답을 시간 정순으로 정렬해 반환한다."""
+        _seed_token_cache()
+        mock_request = MagicMock(
+            return_value=_make_response(
+                _sample_minute_response([
+                    # 시간 역순으로 전달 (KIS 형식)
+                    ("20260108", "140000", 57300, 57400, 57200, 57300, 59047),
+                    ("20260108", "135900", 57400, 57500, 57300, 57300, 118619),
+                    ("20260108", "135800", 57400, 57400, 57300, 57400, 10000),
+                ])
+            )
+        )
+        monkeypatch.setattr(kis_api.httpx, "request", mock_request)
+
+        df = kis_api.fetch_minute_chart_chunk(
+            "005930", date(2026, 1, 8), hour_end="140000"
+        )
+
+        assert list(df.columns) == ["ticker", "datetime", "open", "high", "low", "close", "volume"]
+        assert len(df) == 3
+        # 시간 정순 정렬
+        assert df.iloc[0]["datetime"].strftime("%H%M%S") == "135800"
+        assert df.iloc[1]["datetime"].strftime("%H%M%S") == "135900"
+        assert df.iloc[2]["datetime"].strftime("%H%M%S") == "140000"
+        assert df.iloc[2]["close"] == 57300.0
+        assert df.iloc[2]["volume"] == 59047.0
+
+    def test_returns_empty_when_no_output(self, monkeypatch):
+        """output2 가 빈 배열이면 빈 DataFrame."""
+        _seed_token_cache()
+        mock_request = MagicMock(
+            return_value=_make_response(
+                {"rt_cd": "0", "msg1": "정상", "output1": {}, "output2": []}
+            )
+        )
+        monkeypatch.setattr(kis_api.httpx, "request", mock_request)
+
+        df = kis_api.fetch_minute_chart_chunk("999999", date(2026, 1, 8))
+
+        assert df.empty
+
+    def test_passes_correct_params(self, monkeypatch):
+        """params 가 명세서 그대로 전달되는지 확인."""
+        _seed_token_cache()
+        captured: dict = {}
+
+        def fake_request(method, url, **kwargs):
+            captured.update(kwargs.get("params", {}))
+            return _make_response(_sample_minute_response([]))
+
+        monkeypatch.setattr(kis_api.httpx, "request", fake_request)
+
+        kis_api.fetch_minute_chart_chunk(
+            "005930", date(2026, 1, 8), hour_end="140000", include_premarket=True
+        )
+
+        assert captured["FID_COND_MRKT_DIV_CODE"] == "J"
+        assert captured["FID_INPUT_ISCD"] == "005930"
+        assert captured["FID_INPUT_HOUR_1"] == "140000"
+        assert captured["FID_INPUT_DATE_1"] == "20260108"
+        assert captured["FID_PW_DATA_INCU_YN"] == "Y"
+        assert captured["FID_FAKE_TICK_INCU_YN"] == ""
+
+    @pytest.mark.parametrize("bad_hour", ["14:00", "1400", "1400000", "abcdef", ""])
+    def test_invalid_hour_end_raises(self, bad_hour: str) -> None:
+        """hour_end 가 6자리 숫자가 아니면 ValueError."""
+        with pytest.raises(ValueError):
+            kis_api.fetch_minute_chart_chunk(
+                "005930", date(2026, 1, 8), hour_end=bad_hour
+            )
+
+    def test_skips_rows_with_invalid_time(self, monkeypatch):
+        """stck_cntg_hour 가 비정상이면 그 행만 스킵."""
+        _seed_token_cache()
+        mock_request = MagicMock(
+            return_value=_make_response({
+                "rt_cd": "0", "msg1": "정상",
+                "output1": {},
+                "output2": [
+                    {"stck_bsop_date": "20260108", "stck_cntg_hour": "140000",
+                     "stck_oprc": "100", "stck_hgpr": "100", "stck_lwpr": "100",
+                     "stck_prpr": "100", "cntg_vol": "1", "acml_tr_pbmn": "0"},
+                    {"stck_bsop_date": "20260108", "stck_cntg_hour": "999999",  # 비정상
+                     "stck_oprc": "100", "stck_hgpr": "100", "stck_lwpr": "100",
+                     "stck_prpr": "100", "cntg_vol": "1", "acml_tr_pbmn": "0"},
+                    {"stck_bsop_date": "", "stck_cntg_hour": "135800",  # 빈 날짜
+                     "stck_oprc": "100", "stck_hgpr": "100", "stck_lwpr": "100",
+                     "stck_prpr": "100", "cntg_vol": "1", "acml_tr_pbmn": "0"},
+                ],
+            })
+        )
+        monkeypatch.setattr(kis_api.httpx, "request", mock_request)
+
+        df = kis_api.fetch_minute_chart_chunk("005930", date(2026, 1, 8))
+
+        # 정상 1개만 남음
+        assert len(df) == 1
+        assert df.iloc[0]["datetime"].strftime("%H%M%S") == "140000"
