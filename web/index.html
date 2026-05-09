@@ -27,12 +27,22 @@
 <body class="min-h-screen">
 
 <!-- 상단 헤더 -->
-<header class="border-b border-gray-700 px-6 py-3 flex items-center justify-between sticky top-0 z-10" style="background:#0d1117">
-  <div class="flex items-center gap-3">
+<header class="border-b border-gray-700 px-6 py-3 flex items-center gap-4 sticky top-0 z-20" style="background:#0d1117">
+  <div class="flex items-center gap-3 flex-shrink-0">
     <span class="text-xl font-bold text-blue-400">📈 Swing Scanner</span>
     <span id="scan-date-badge" class="text-xs text-gray-400 bg-gray-800 px-2 py-1 rounded"></span>
   </div>
-  <div class="flex items-center gap-2 text-sm">
+
+  <!-- 종목 검색 -->
+  <div class="flex-1 max-w-md relative">
+    <input id="search-input" type="text"
+           placeholder="종목 검색 (이름 또는 코드 — 예: 삼성전자, 005930, AAPL)"
+           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+           autocomplete="off" />
+    <div id="search-dropdown" class="hidden absolute top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded shadow-xl max-h-80 overflow-y-auto z-50"></div>
+  </div>
+
+  <div class="flex items-center gap-2 text-sm flex-shrink-0">
     <a href="/docs" target="_blank" class="text-gray-400 hover:text-blue-400">API 문서</a>
     <span id="status-dot" class="w-2 h-2 rounded-full bg-gray-500" title="서버 상태"></span>
   </div>
@@ -209,6 +219,84 @@ async function loadResults() {
     console.error(e);
   }
 }
+
+// ── 종목 검색 (autocomplete) ─────────────────────────────────
+const _searchInput = document.getElementById('search-input');
+const _searchDrop  = document.getElementById('search-dropdown');
+let _searchTimer = null;
+let _searchItems = [];
+let _searchHover = -1;  // 키보드 ↑↓ 선택 인덱스
+
+async function _doSearch(q) {
+  try {
+    const r = await fetch(`${API}/api/markets/search?q=${encodeURIComponent(q)}`);
+    if (!r.ok) { _hideSearch(); return; }
+    _searchItems = await r.json();
+    _searchHover = -1;
+    _renderSearchDrop();
+  } catch (e) { console.error(e); }
+}
+
+function _renderSearchDrop() {
+  if (_searchItems.length === 0) {
+    _searchDrop.innerHTML = '<div class="px-3 py-2 text-gray-500 text-sm">결과 없음 — Enter 로 직접 이동</div>';
+  } else {
+    _searchDrop.innerHTML = _searchItems.map((it, i) => `
+      <a href="stock.html?ticker=${it.ticker}"
+         class="search-item block px-3 py-2 hover:bg-gray-800 border-b border-gray-800 ${i === _searchHover ? 'bg-gray-800' : ''}"
+         data-ticker="${it.ticker}">
+        <span class="font-mono text-sm text-blue-400">${it.ticker}</span>
+        <span class="ml-2 text-sm text-gray-200">${it.name}</span>
+        <span class="ml-2 text-xs text-gray-500">${it.market}</span>
+      </a>`).join('');
+  }
+  _searchDrop.classList.remove('hidden');
+}
+
+function _hideSearch() {
+  _searchDrop.classList.add('hidden');
+  _searchHover = -1;
+}
+
+_searchInput.addEventListener('input', (e) => {
+  clearTimeout(_searchTimer);
+  const q = e.target.value.trim();
+  if (q.length < 1) { _hideSearch(); return; }
+  _searchTimer = setTimeout(() => _doSearch(q), 200);
+});
+
+_searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (_searchHover >= 0 && _searchItems[_searchHover]) {
+      location.href = `stock.html?ticker=${_searchItems[_searchHover].ticker}`;
+      return;
+    }
+    const q = e.target.value.trim();
+    if (q) location.href = `stock.html?ticker=${q.toUpperCase()}`;
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (_searchItems.length > 0) {
+      _searchHover = (_searchHover + 1) % _searchItems.length;
+      _renderSearchDrop();
+    }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (_searchItems.length > 0) {
+      _searchHover = (_searchHover - 1 + _searchItems.length) % _searchItems.length;
+      _renderSearchDrop();
+    }
+  } else if (e.key === 'Escape') {
+    _hideSearch();
+    _searchInput.blur();
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (!_searchInput.contains(e.target) && !_searchDrop.contains(e.target)) {
+    _hideSearch();
+  }
+});
 
 checkHealth();
 loadSummary();
