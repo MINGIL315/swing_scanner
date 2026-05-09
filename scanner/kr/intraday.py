@@ -17,7 +17,9 @@ CLAUDE.md §1 의 멀티 타임프레임 정의:
     drop_partial=False  → 부분 봉 포함 (실시간 표시용)
 
 한국 정규시장 영업시간(09:00~15:30, 점심 휴식 X) 기준이며
-``origin='start_day'`` 사용 — 09:00 부터 정시 단위로 그룹핑.
+``origin='start_day', offset='9h'`` 사용 — 자정이 아니라 09:00 을 기점으로
+4h 그룹을 끊는다 (09:00~13:00, 13:00~17:00). 60분봉은 정시 단위라 offset
+영향 없음.
 """
 from __future__ import annotations
 
@@ -31,6 +33,12 @@ _AGG = {
     "close": "last",
     "volume": "sum",
 }
+
+# 완전봉 판정 — 기대 분봉 갯수의 몇 %를 채워야 완전봉으로 인정할지.
+# KIS 1분봉이 09:00 가 아니라 09:01 부터 시작 (시초가 체결 직후) → 09:00~12:59 그룹은
+# 240 분 중 239 분만 채워짐 (99.6%). 0.95 면 09:00 봉 통과, 13:00 부분봉 (150/240=62.5%)
+# 은 드랍 — 의도와 일치.
+_PARTIAL_FILL_THRESHOLD: float = 0.95
 
 
 def resample_to_minutes(
@@ -71,24 +79,26 @@ def resample_to_minutes(
 
     grouped = (
         df.set_index("datetime")[list(_AGG.keys())]
-        .resample(rule, origin="start_day", label="left", closed="left")
+        .resample(rule, origin="start_day", offset="9h", label="left", closed="left")
         .agg(_AGG)
     )
 
     if drop_partial:
-        # 부분 봉 판정 — volume 0 인 빈 그룹 또는 데이터 양이 rule 분량 미만
+        # 부분 봉 판정 — volume 0 인 빈 그룹 또는 데이터 양이 rule 분량의 95% 미만
         # rule 분량 산출 (간단화): 60min → 60, 4h → 240
         bar_minutes = _rule_minutes(rule)
         if bar_minutes:
             counts = (
                 df.set_index("datetime")
-                .resample(rule, origin="start_day", label="left", closed="left")
+                .resample(rule, origin="start_day", offset="9h", label="left", closed="left")
                 .size()
             )
-            full_index = counts[counts >= bar_minutes].index
+            min_count = bar_minutes * _PARTIAL_FILL_THRESHOLD
+            full_index = counts[counts >= min_count].index
             grouped = grouped.loc[grouped.index.isin(full_index)]
 
-    grouped = grouped.dropna(how="all").reset_index()
+    # OHLC 중 하나라도 NaN 인 봉은 drop (빈 시간대/부분 봉의 일부 결측)
+    grouped = grouped.dropna(subset=["open", "high", "low", "close"]).reset_index()
 
     if ticker is not None:
         grouped.insert(0, "ticker", ticker)

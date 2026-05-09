@@ -84,9 +84,13 @@ class PatternDetector(ABC):
     ) -> EntrySignal:
         """진입 타이밍 신호를 평가한다.
 
+        CLAUDE.md §1 — 4시간봉 = 진입 타이밍 (거래량·캔들·RSI 다이버전스).
+
         Args:
             df          : 일봉 DataFrame.
-            intraday_df : 60분봉 DataFrame (없으면 일봉으로 대리 평가).
+            intraday_df : 4시간봉 DataFrame (없으면 일봉으로 대리 평가).
+                          MA20·박스 상단·20일 고점 같은 일봉 컨텍스트는
+                          ``df`` 를 그대로 사용한다.
 
         Returns:
             EntrySignal 인스턴스.

@@ -65,9 +65,8 @@ def analyze_ticker(
         market      : "KR" 또는 "US".
         daily_df    : 일봉 OHLCV DataFrame (최신 행이 마지막).
         fundamentals: {'market_cap'} 딕셔너리. None 이면 재무 필터 건너뜀.
-        intraday_df : 60분봉 DataFrame (4시간봉 합성 원천). None 이면 각 패턴의
-                      entry_signal 이 일봉으로 대리 평가 (CLAUDE.md §1 의 진입
-                      타이밍 프레임은 4시간봉이지만, 60분봉을 받아 패턴별로 활용).
+        intraday_df : 4시간봉 DataFrame (CLAUDE.md §1 진입 타이밍 프레임).
+                      None 이면 각 패턴의 entry_signal 이 일봉으로 대리 평가.
 
     Returns:
         TickerScanResult 인스턴스. entry_signals 는 pattern_results 와 1:1 매핑.
@@ -144,7 +143,7 @@ def scan_universe(
         daily_dfs       : ticker → 일봉 DataFrame 매핑.
         market_map      : ticker → "KR" | "US" 매핑.
         fundamentals_map: ticker → fundamentals dict. None 이면 재무 필터 생략.
-        intraday_dfs    : ticker → 60분봉 DataFrame. None 이면 진입 신호가 일봉
+        intraday_dfs    : ticker → 4시간봉 DataFrame. None 이면 진입 신호가 일봉
                           으로 대리 평가됨.
         max_workers     : ThreadPoolExecutor 워커 수.
 
