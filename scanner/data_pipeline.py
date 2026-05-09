@@ -390,6 +390,32 @@ def fetch_all_fundamentals(
     return {"success": success_count, "failed": failed_count}
 
 
+def _recent_business_days(end: date, n: int) -> list[date]:
+    """``end`` 이전의 최근 ``n`` 영업일을 반환한다 (KR 기준).
+
+    OHLCVDaily 의 적재된 일자에서 추출 — 우량주(005930 삼성전자) 의 일봉 일자가
+    KR 영업일과 동일. KIS 휴장일에는 일봉도 적재 안 되므로 자동으로 토/일/공휴일
+    제외된 영업일만 반환.
+
+    OHLCVDaily 가 비어있으면 fallback 으로 단순 캘린더 거꾸로 반환 (가능한 모든
+    날짜, 휴장일 포함).
+    """
+    sample_ticker = "005930"  # KOSPI200 항상 멤버, 적재 보장
+    with get_session() as sess:
+        rows = sess.execute(
+            select(OHLCVDaily.date)
+            .where(OHLCVDaily.ticker == sample_ticker)
+            .where(OHLCVDaily.date <= end)
+            .order_by(OHLCVDaily.date.desc())
+            .limit(n)
+        ).all()
+    if rows:
+        return [r[0] for r in rows]
+    # fallback: 일봉 미적재 상태에선 캘린더 거꾸로
+    logger.warning("OHLCVDaily 가 비어있음 — 영업일 필터 fallback (캘린더)")
+    return [end - timedelta(days=i) for i in range(n)]
+
+
 def fetch_all_intraday(
     market: str = "KR",
     target_dates: list[date] | None = None,
@@ -493,17 +519,13 @@ def run_data_pipeline(
     )
 
     if with_intraday and market.upper() in ("KR", "ALL"):
-        # 최근 N 영업일 기준으로 단순 캘린더 거꾸로 (영업일/주말 정확 판정은 KIS 측에서)
-        today = date.today()
-        target_dates = [
-            today - timedelta(days=i)
-            for i in range(intraday_lookback_days)
-        ]
+        # OHLCVDaily 의 적재된 일자 = KR 실 영업일 (휴장일 자동 제외)
+        target_dates = _recent_business_days(date.today(), intraday_lookback_days)
         intraday_result = fetch_all_intraday(market="KR", target_dates=target_dates)
         console.print(
             f"[green]분봉[/green] 성공={intraday_result['success']} "
             f"실패={intraday_result['failed']} "
-            f"({intraday_lookback_days}영업일 시도)"
+            f"({len(target_dates)}영업일)"
         )
 
     console.print("[bold cyan]== 파이프라인 완료 ==[/bold cyan]")

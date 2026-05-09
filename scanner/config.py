@@ -88,7 +88,7 @@ MIN_MARKET_CAP_USD: float = 1_000_000_000     # 시가총액 10억 USD
 # 데이터 fetch 동시성 / 재시도
 # ---------------------------------------------------------------------------
 
-FETCH_MAX_WORKERS: int = 2                     # KIS 서버 부하 회피 — 동시 호출 적게
+FETCH_MAX_WORKERS: int = 4                     # 4워커 × rate 0.2초 = 초당 ~20건 (KIS 한도 정확)
 FETCH_RETRY_MAX: int = 3
 FETCH_RETRY_BACKOFF_BASE: float = 2.0          # exponential: base ** attempt 초
 FETCH_TIMEOUT_SECONDS: float = 30.0
