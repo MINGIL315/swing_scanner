@@ -19,6 +19,7 @@ from scanner.kr.indicators.macd import macd
 from scanner.kr.indicators.rsi import rsi
 from scanner.kr.indicators.volume import volume_ratio
 from scanner.kr.patterns.base import EntrySignal, PatternDetector, PatternResult
+from scanner.kr.quote_align import align_to_tick
 
 # 박스 형성 윈도우 후보 (명확성 순으로 시도)
 _BOX_WINDOWS: list[int] = [30, 45, 60]
@@ -169,9 +170,9 @@ class BoxBreakoutDetector(PatternDetector):
             pattern_name=self.name,
             ticker=ticker,
             detected_at=detected_at,
-            entry_price=round(entry_price, 4),
-            stop_loss=round(stop_loss, 4),
-            target_price=round(target_price, 4),
+            entry_price=align_to_tick(entry_price),
+            stop_loss=align_to_tick(stop_loss),
+            target_price=align_to_tick(target_price),
             risk_reward_ratio=rr,
             raw_score=round(raw_score, 2),
             details=details,

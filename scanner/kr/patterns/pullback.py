@@ -18,6 +18,7 @@ from scanner.kr.indicators.moving_average import sma
 from scanner.kr.indicators.rsi import rsi
 from scanner.kr.patterns.base import EntrySignal, PatternDetector, PatternResult
 from scanner.kr.patterns.trend import detect_weekly_trend
+from scanner.kr.quote_align import align_to_tick
 
 # 주봉 추세 판정에 필요한 최소 일봉 행 수 (64주 × 5일 + 여유)
 _MIN_DAILY_ROWS: int = 350
@@ -197,9 +198,9 @@ class PullbackDetector(PatternDetector):
             pattern_name=self.name,
             ticker=ticker,
             detected_at=detected_at,
-            entry_price=round(entry_price, 4),
-            stop_loss=round(stop_loss, 4),
-            target_price=round(target_price, 4),
+            entry_price=align_to_tick(entry_price),
+            stop_loss=align_to_tick(stop_loss),
+            target_price=align_to_tick(target_price),
             risk_reward_ratio=rr,
             raw_score=round(raw_score, 2),
             details=details,
