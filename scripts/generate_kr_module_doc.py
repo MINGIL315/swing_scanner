@@ -267,36 +267,254 @@ def build() -> Path:
         col_widths_cm=[5.5, 4.0, 7.0],
     )
 
-    _add_heading(doc, "4.5 패턴 탐지 (4가지)", 2)
+    _add_heading(doc, "4.5 패턴 탐지 — 핵심 모듈", 2)
     _add_table(
         doc,
-        ["모듈", "패턴 정의 (CLAUDE.md §5)"],
+        ["모듈", "역할"],
         [
-            ["scanner/kr/patterns/base.py",          "PatternDetector ABC + EntrySignal/PatternResult dataclass + entry_signal() 추상"],
-            ["scanner/kr/patterns/trend.py",         "주봉 추세 판정 (uptrend / downtrend / sideways) + detect_weekly_trend"],
-            ["scanner/kr/patterns/double_bottom.py", "쌍바닥 — 60일 내 ±3% 저점 2~3개, 목선 5%↑, 두 번째 저점 후 목선 돌파"],
-            ["scanner/kr/patterns/golden_cross.py",  "골든크로스 — MA20 이 MA60 을 5일 이내 상향 돌파, MA60 평탄/상승, 거래량 1.2배"],
-            ["scanner/kr/patterns/box_breakout.py",  "박스권 돌파 — 30~60일 ±10% 박스 + 최근 1~3일 상단 1%↑ 돌파, 거래량 1.5배"],
-            ["scanner/kr/patterns/pullback.py",      "눌림목 — 주봉 상승 + 정배열(MA5>MA20>MA60) + MA20/MA60 ±2% + 양봉 + 거래량↑"],
+            ["scanner/kr/patterns/base.py",   "PatternDetector ABC + EntrySignal/PatternResult dataclass + entry_signal() 추상"],
+            ["scanner/kr/patterns/trend.py",  "주봉 추세 판정 (uptrend / downtrend / sideways) — detect_weekly_trend()"],
         ],
         col_widths_cm=[5.5, 11.0],
     )
 
-    _add_heading(doc, "4.6 신뢰도 점수 (CLAUDE.md §6)", 2)
+    # ── 4.5.0 주봉 추세 판정 ──────────────────────────────────────
+    _add_heading(doc, "4.5.0 주봉 추세 판정 (trend.py)", 3)
+    _add_para(doc, "scanner/kr/patterns/trend.py 의 detect_weekly_trend() — 모든 패턴이 신뢰도 점수 산출 시 공유한다. 일봉을 W-MON 으로 resample 한 주봉을 입력으로 받아 3가지 신호로 방향을 판정한다.")
     _add_table(
         doc,
-        ["항목", "가중치", "산출 로직"],
+        ["판정 신호", "정의", "임계값"],
         [
-            ["주봉 추세 일치",                  "30%", "주봉 방향과 패턴이 일치하면 가산 (uptrend → 만점)"],
-            ["패턴 명확도 (raw_score)",         "25%", "각 detector 의 _calc_raw_score 값 (저점 균일성, 박스 밀도 등)"],
-            ["거래량 (돌파일/평균)",            "20%", "당일 거래량 / 20일 평균 비율"],
-            ["이동평균선 정배열 (5>20>60)",     "15%", "정배열이면 만점, 어긋나면 감점"],
-            ["RSI (30~70 범위 + 다이버전스)",   "10%", "정상 범위 가산, 다이버전스 추가 가산"],
-            ["합계",                            "100%", "scanner/kr/scoring/scorer.py:calculate_confidence_score"],
+            ["MA20 > MA60",        "단기-장기 이평선 정배열",                        "주봉 종가의 SMA20 / SMA60 비교"],
+            ["종가 > MA20",        "가격이 단기선 위인지",                           "weekly close > weekly SMA20"],
+            ["MA60 기울기",        "최근 8주 누적 변화율 (OLS slope × len / mean)",  "uptrend ≥ -1%, downtrend ≤ -2%"],
         ],
-        col_widths_cm=[5.5, 2.5, 8.0],
+        col_widths_cm=[5.0, 6.5, 5.0],
     )
-    _add_para(doc, "70점 이상 종목만 최종 리포트에 포함한다 (--min-confidence 로 조정 가능).", italic=True)
+    _add_table(
+        doc,
+        ["방향", "조건"],
+        [
+            ["uptrend",          "정배열 AND 종가>MA20 AND MA60 8주 슬로프 ≥ -1%"],
+            ["downtrend",        "역배열 AND 종가<MA20 AND MA60 8주 슬로프 ≤ -2%"],
+            ["sideways",         "위 두 조건 모두 불충족"],
+            ["insufficient_data","주봉 행 수 < 68 (= MA60 + 슬로프 윈도우 8) 또는 MA NaN"],
+        ],
+        col_widths_cm=[4.5, 12.0],
+    )
+    _add_para(doc, "추세 강도 (strength) = (MA20 − MA60) / MA60 × 100. 양수 = 정배열 폭, 음수 = 역배열 폭. 절댓값이 클수록 추세 진행도가 높다.", italic=True)
+
+    # ── 4.5.1 쌍바닥 ──────────────────────────────────────────────
+    _add_heading(doc, "4.5.1 쌍바닥 (DoubleBottomDetector — double_bottom.py)", 3)
+    _add_para(doc, "U 자형 저점 두 개가 비슷한 가격에 형성되고, 사이의 고점(목선)을 돌파하면 매수 신호.")
+    _add_para(doc, "데이터 요건: 일봉 ≥ 65 행 (60일 lookback + peak distance 5)", italic=True)
+    _add_para(doc, "탐지 알고리즘:", bold=True)
+    _add_code(doc,
+        "1. 최근 60일 윈도우에서 종가의 저점 탐색\n"
+        "    - scipy.signal.find_peaks(-close, distance=5, prominence=중앙값×3%)\n"
+        "    - prominence: 중앙값 × 3% — 미세 노이즈 필터링\n"
+        "    - distance=5: 저점 간 최소 5거래일 간격\n"
+        "2. 최근 MAX_LOWS(=3) 개 저점만 검토 (트림)\n"
+        "3. 저점 가격 균일성: (max − min) / min ≤ 6% (LOW_TOLERANCE × 2)\n"
+        "4. 두 저점 사이 최고가 = 목선 (neckline)\n"
+        "5. 목선 ≥ 평균 저점 × 1.05 (NECKLINE_GAIN_PCT = 5%)\n"
+        "6. 두 번째 저점 이후 최근 5거래일 내 종가 > 목선 → 돌파 확인\n"
+    )
+    _add_para(doc, "진입가 / 손절가 / 목표가:", bold=True)
+    _add_table(
+        doc,
+        ["가격", "산출식"],
+        [
+            ["진입가",  "neckline × 1.005 (목선 돌파 후 0.5% 위)"],
+            ["손절가",  "평균 저점 × 0.97 (저점 -3%)"],
+            ["목표가",  "neckline + (neckline − 평균 저점) — 패턴 높이만큼 가산"],
+        ],
+        col_widths_cm=[3.5, 13.0],
+    )
+    _add_para(doc, "raw_score 구성 (0~100):", bold=True)
+    _add_table(
+        doc,
+        ["항목", "최대점", "산출"],
+        [
+            ["저점 균일성",         "30",  "1 − spread_pct / 6%"],
+            ["목선 높이",           "30",  "min(1, (목선 − 평균저점) / 평균저점 / 10%)"],
+            ["돌파 강도",           "20",  "min(1, (현재가 − 목선) / 목선 / 3%)"],
+            ["돌파 후 거래량 비율", "20",  "min(1, (post_avg_vol / pre_avg_vol − 1) / 0.5)"],
+            ["higher low 보너스",   "+5",  "두 번째 저점 ≥ 첫 저점 × 1.005 — 매도세 약화 신호"],
+        ],
+        col_widths_cm=[5.5, 2.0, 9.0],
+    )
+
+    # ── 4.5.2 골든크로스 ──────────────────────────────────────────
+    _add_heading(doc, "4.5.2 골든크로스 (GoldenCrossDetector — golden_cross.py)", 3)
+    _add_para(doc, "단기선이 장기선을 상향 돌파하는 추세 전환 신호. 단순 교차가 아니라 장기선의 평탄/상승 + 돌파일 거래량 급증을 함께 요구해 페이크아웃을 거른다.")
+    _add_para(doc, "데이터 요건: 일봉 ≥ 60(MA60) + 5(RECENT) + 20(SLOPE) = 85 행", italic=True)
+    _add_para(doc, "탐지 알고리즘:", bold=True)
+    _add_code(doc,
+        "1. SMA20, SMA60 계산\n"
+        "2. 최근 5거래일 내 골든크로스 발생 인덱스 탐색\n"
+        "    - prev: MA20[i-1] ≤ MA60[i-1]\n"
+        "    - curr: MA20[i]   > MA60[i]\n"
+        "3. MA60 기울기 검증 — 최근 20일의 (last − first) / first\n"
+        "    - 슬로프 ≥ -0.5% 이어야 통과 (평탄/상승 인정)\n"
+        "    - 하락 추세에서 일시 반등은 거름\n"
+        "4. 돌파일 거래량 비율 ≥ 1.2 (당일 / 직전 20일 평균)\n"
+    )
+    _add_para(doc, "진입가 / 손절가 / 목표가:", bold=True)
+    _add_table(
+        doc,
+        ["가격", "산출식"],
+        [
+            ["진입가",  "현재 종가"],
+            ["손절가",  "MA60 × 0.97 (장기선 -3%)"],
+            ["목표가",  "현재 종가 × 1.10 (+10%)"],
+        ],
+        col_widths_cm=[3.5, 13.0],
+    )
+    _add_para(doc, "raw_score 구성 (0~100):", bold=True)
+    _add_table(
+        doc,
+        ["항목", "최대점", "산출"],
+        [
+            ["MA60 기울기",   "30", "min(1, max(0, (slope − -0.5%) / 2%))"],
+            ["돌파일 거래량", "30", "min(1, (vol_ratio − 1) / 1)"],
+            ["MA 이격",       "20", "min(1, (MA20 − MA60) / MA60 / 3%)"],
+            ["교차 신선도",   "20", "max(0, 1 − days_since_cross / 5)"],
+        ],
+        col_widths_cm=[5.5, 2.0, 9.0],
+    )
+
+    # ── 4.5.3 박스권 돌파 ─────────────────────────────────────────
+    _add_heading(doc, "4.5.3 박스권 돌파 (BoxBreakoutDetector — box_breakout.py)", 3)
+    _add_para(doc, "수평 횡보 후 상단 돌파. 30/45/60일 윈도우 중 가장 명확한(range_pct 최소) 박스를 자동 선택한다.")
+    _add_para(doc, "데이터 요건: 일봉 ≥ 60 + 3 + 1 = 64 행", italic=True)
+    _add_para(doc, "탐지 알고리즘:", bold=True)
+    _add_code(doc,
+        "1. 윈도우 후보 [30, 45, 60] 각각 시도, range_pct 최소인 박스 채택\n"
+        "2. 박스 영역 = (전체 길이 − RECENT_DAYS=3 − 1) 직전의 window 일\n"
+        "    - box_top    = 영역 내 close 최댓값  (※ 종가 기반 — wick outlier 제거)\n"
+        "    - box_bottom = 영역 내 close 최솟값\n"
+        "    - range_pct  = (top − bottom) / 박스 평균 종가\n"
+        "    - range_pct ≤ 15% 이어야 박스 인정 (BOX_BREAKOUT_RANGE_PCT, KOSPI 현실 반영)\n"
+        "3. 최근 3일 내 종가 > box_top × 1.01 → 돌파 확인\n"
+        "4. 돌파일 거래량 비율 ≥ 1.5 (당일 / 직전 20일 평균)\n"
+    )
+    _add_para(doc, "주의 — high.max/low.min 기반 산출은 단일 wick 영향으로 박스가 부풀려져 KOSPI200 의 30일 range median 24% 를 만들어 박스 후보 0건 이슈를 일으킴. 종가 기반 산출 + 15% 임계값 조합이 KOSPI 종목의 자연스런 변동폭과 박스의 의미(매수/매도 종가 균형) 를 모두 반영. 진단: scripts/diag_box_breakout.py / diag_box_breakout_v2.py.", italic=True)
+    _add_para(doc, "진입가 / 손절가 / 목표가:", bold=True)
+    _add_table(
+        doc,
+        ["가격", "산출식"],
+        [
+            ["진입가",  "현재 종가"],
+            ["손절가",  "box_bottom × 0.98 (박스 하단 -2%)"],
+            ["목표가",  "box_top + (box_top − box_bottom) — 박스 높이만큼 추가"],
+        ],
+        col_widths_cm=[3.5, 13.0],
+    )
+    _add_para(doc, "raw_score 구성 (0~100):", bold=True)
+    _add_table(
+        doc,
+        ["항목", "최대점", "산출"],
+        [
+            ["박스 밀도",     "30", "1 − range_pct / 10%"],
+            ["돌파일 거래량", "30", "min(1, (vol_ratio − 1) / 1)"],
+            ["돌파 강도",     "20", "min(1, (현재가 − box_top) / box_top / 5%)"],
+            ["돌파 신선도",   "20", "max(0, 1 − days_since_break / 3)"],
+        ],
+        col_widths_cm=[5.5, 2.0, 9.0],
+    )
+
+    # ── 4.5.4 눌림목 ──────────────────────────────────────────────
+    _add_heading(doc, "4.5.4 눌림목 (PullbackDetector — pullback.py)", 3)
+    _add_para(doc, "상승 추세 종목이 일시 조정으로 이평선까지 눌렸다가 양봉 + 거래량으로 반등하는 자리. 4가지 패턴 중 유일하게 주봉 추세가 상승이어야 한다는 필수 전제 조건이 detect 단계에 들어간다.")
+    _add_para(doc, "데이터 요건: 일봉 ≥ 350 행 (주봉 추세 64주 × 5일 + 여유)", italic=True)
+    _add_para(doc, "탐지 알고리즘:", bold=True)
+    _add_code(doc,
+        "1. 일봉 → 주봉 resample (W-MON, 미완성 주봉 drop)\n"
+        "2. detect_weekly_trend() == 'uptrend' (필수 — 다른 패턴엔 없는 강제 조건)\n"
+        "3. 일봉 정배열 확인: MA5 > MA20 > MA60\n"
+        "4. 현재가가 MA20 또는 MA60 의 ±2% 범위 안에 있는지\n"
+        "    - near_ma20 = |close − MA20| / MA20 ≤ 2%\n"
+        "    - near_ma60 = |close − MA60| / MA60 ≤ 2%\n"
+        "5. 당일 양봉 (close > open)\n"
+        "6. 당일 거래량 > 직전 5일 평균\n"
+    )
+    _add_para(doc, "진입가 / 손절가 / 목표가:", bold=True)
+    _add_table(
+        doc,
+        ["가격", "산출식"],
+        [
+            ["진입가",  "현재 종가"],
+            ["손절가",  "MA60 × 0.97 (장기선 -3%)"],
+            ["목표가",  "직전 20일 고점 (없거나 < 진입가면 진입가 × 1.08)"],
+        ],
+        col_widths_cm=[3.5, 13.0],
+    )
+    _add_para(doc, "raw_score 구성 (0~100):", bold=True)
+    _add_table(
+        doc,
+        ["항목", "최대점", "산출"],
+        [
+            ["주봉 강도",     "30", "min(1, max(0, weekly_strength / 5%))"],
+            ["MA 정배열 간격", "25", "min(1, (MA5−MA20) / MA20 / 2%)"],
+            ["MA 근접도",     "25", "max(0, 1 − proximity_pct / 2%) — 가까울수록 고점수"],
+            ["거래량",        "20", "min(1, (vol_ratio − 1) / 0.5)"],
+        ],
+        col_widths_cm=[5.5, 2.0, 9.0],
+    )
+
+    # ── 4.5.5 패턴 임계값 일람 ────────────────────────────────────
+    _add_heading(doc, "4.5.5 패턴 임계값 일람 (config.py)", 3)
+    _add_para(doc, "scanner/config.py 에 모든 패턴 임계값이 상수로 모여 있다 (매직 넘버 제거). 변경 시 한 곳만 수정.")
+    _add_table(
+        doc,
+        ["상수", "값", "의미"],
+        [
+            ["DOUBLE_BOTTOM_LOOKBACK_DAYS",       "60",       "쌍바닥 탐색 구간"],
+            ["DOUBLE_BOTTOM_LOW_TOLERANCE_PCT",   "0.03",     "두 저점 허용 차이 ±3%"],
+            ["DOUBLE_BOTTOM_NECKLINE_GAIN_PCT",   "0.05",     "목선 +5% 이상"],
+            ["GOLDEN_CROSS_FAST_MA / SLOW_MA",    "20 / 60",  "단기 / 장기 이평선"],
+            ["GOLDEN_CROSS_RECENT_DAYS",          "5",        "최근 5일 내 크로스"],
+            ["GOLDEN_CROSS_VOLUME_RATIO",         "1.2",      "돌파일 거래량 / 20일 평균"],
+            ["BOX_BREAKOUT_MIN/MAX_DAYS",         "30 / 60",  "박스 형성 일수 범위"],
+            ["BOX_BREAKOUT_RANGE_PCT",            "0.15",     "박스 폭 ±15% (종가 기반, KOSPI 현실 반영)"],
+            ["BOX_BREAKOUT_BREAK_PCT",            "0.01",     "상단 돌파 +1%"],
+            ["BOX_BREAKOUT_VOLUME_RATIO",         "1.5",      "돌파일 거래량 / 20일 평균"],
+            ["PULLBACK_MA_NEAR_PCT",              "0.02",     "MA20/MA60 ±2% 근접"],
+            ["PULLBACK_VOLUME_LOOKBACK",          "5",        "거래량 평균 5일"],
+            ["MA_SHORT / MEDIUM / LONG",          "5 / 20 / 60", "정배열 검사 이평선"],
+        ],
+        col_widths_cm=[6.0, 2.5, 8.0],
+    )
+
+    _add_heading(doc, "4.6 신뢰도 점수 (CLAUDE.md §6)", 2)
+    _add_para(doc, "scanner/kr/scoring/scorer.py 의 calculate_confidence_score() — 5개 컴포넌트의 0~100 점수를 가중합산하여 최종 신뢰도 점수를 산출.")
+    _add_table(
+        doc,
+        ["컴포넌트", "가중치", "0~100 점수 산출"],
+        [
+            ["주봉 추세 (weekly_trend)",       "30%", "uptrend=100 / sideways=40 / downtrend=0 / 기타=0"],
+            ["패턴 명확도 (pattern_clarity)",  "25%", "PatternResult.raw_score 그대로 사용 (각 detector 의 _calc_raw_score)"],
+            ["거래량 (volume)",                "20%", "min(100, max(0, (vol_ratio − 1) / 0.5 × 100)) — 1.0=0점, 1.5+=100점"],
+            ["MA 정배열 (ma_alignment)",       "15%", "details.ma5/20/60 정배열이면 100, 아니면 0. 없으면 100 (탐지 자체가 정배열 함의)"],
+            ["RSI (rsi)",                      "10%", "40~70=100점, <40=val/40×100, >70=(100−val)/30×100, 데이터 부족=중립 50"],
+            ["**합계**",                       "100%", "Σ(score_i × weight_i), clip [0, 100], 소수 둘째 자리 round"],
+        ],
+        col_widths_cm=[5.5, 2.0, 9.0],
+    )
+    _add_para(doc, "주의 — 거래량 점수의 입력 vol_ratio 는 detector.details['vol_ratio'] 에서 가져온다. 패턴별로 의미가 약간 다름:", italic=True)
+    _add_table(
+        doc,
+        ["패턴", "vol_ratio 의미"],
+        [
+            ["double_bottom",  "details 에 vol_ratio 키 없음 → scorer 가 0 으로 받아 거래량 점수 0 (raw_score 의 거래량 항목으로 대체 평가)"],
+            ["golden_cross",   "details.vol_ratio_at_cross — 돌파일 거래량 / 20일 평균"],
+            ["box_breakout",   "details.vol_ratio_at_break — 동일"],
+            ["pullback",       "details.vol_ratio — 당일 거래량 / 5일 평균"],
+        ],
+        col_widths_cm=[4.0, 12.5],
+    )
+    _add_para(doc, "70점 이상 종목만 최종 리포트에 포함한다 (CLI --min-confidence 로 조정).", italic=True)
 
     _add_heading(doc, "4.7 진입 신호 (4시간봉 기반)", 2)
     _add_para(doc, "각 detector 의 entry_signal() 메서드가 4가지 신호를 평가한다 (각 25점, 합계 0~100). 4시간봉이 진입 타이밍 프레임이며, MA20·박스 상단·20일 고점 같은 일봉 컨텍스트는 일봉 그대로 사용한다.")

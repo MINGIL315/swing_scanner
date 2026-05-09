@@ -40,6 +40,10 @@ def _find_best_box(df: pd.DataFrame) -> _BoxInfo | None:
     """30/45/60일 윈도우 중 가장 명확한 박스를 찾는다.
 
     명확성 기준: range_pct 가 가장 작으면서 BOX_BREAKOUT_RANGE_PCT 이하인 것.
+
+    box_top / box_bottom 은 **종가 기반** (close.max / close.min) 으로 산출 —
+    단일 wick (high/low extreme) 이 박스를 부풀리는 outlier 영향을 제거한다.
+    박스의 의미 = 매수/매도가 균형을 이룬 종가 거래대 = 지지/저항선.
     """
     n = len(df)
     best: _BoxInfo | None = None
@@ -59,8 +63,8 @@ def _find_best_box(df: pd.DataFrame) -> _BoxInfo | None:
         if mean_price == 0:
             continue
 
-        box_top    = float(box_df["high"].max())
-        box_bottom = float(box_df["low"].min())
+        box_top    = float(box_df["close"].max())
+        box_bottom = float(box_df["close"].min())
         range_pct  = (box_top - box_bottom) / mean_price
 
         if range_pct > BOX_BREAKOUT_RANGE_PCT:
@@ -93,9 +97,9 @@ class BoxBreakoutDetector(PatternDetector):
     """박스권 돌파 패턴 탐지기.
 
     CLAUDE.md §5.3 정의:
-    - 30~60일 윈도우 내 (고점-저점)/평균 ≤ 10% 박스권 형성
+    - 30~60일 윈도우 내 종가 max/min 기반 range ≤ 15% 박스권 형성
     - 가장 명확한(range_pct 최소) 박스 채택
-    - 최근 1~3일 종가 > 박스 상단 × 1.01
+    - 최근 1~3일 종가 > 박스 상단(종가 max) × 1.01
     - 돌파일 거래량 비율 ≥ 1.5
     """
 
