@@ -105,7 +105,7 @@ def fetch_weekly(
 
 
 # ---------------------------------------------------------------------------
-# 60분봉 (운영 미사용 placeholder)
+# 분봉 (1분 단위 — 4시간봉 합성용 원시 데이터)
 # ---------------------------------------------------------------------------
 
 
@@ -113,18 +113,27 @@ def fetch_intraday(
     ticker: str,
     target_date: date,
 ) -> pd.DataFrame:
-    """단일 날짜의 60분봉 OHLCV 를 반환한다 (현재 placeholder).
+    """단일 영업일의 1분봉 OHLCV 를 KIS API 로 받는다.
 
-    운영 코드 (data_pipeline / scanner / cli) 에서 호출되지 않으며
-    KIS 분봉 API 실구현은 Phase C 에서 도입 예정.
+    KIS 가 1분봉만 제공하므로 60분/4시간봉 등은 호출처에서 합성한다
+    (``pandas.resample('60min')`` / ``'4H'``).
+
+    영업시간 09:00~15:30 을 4 chunk 로 분할 호출 후 합치기 (kis_api 측에서 처리).
+    정규 영업일 ~390개 1분봉. 휴장일/주말은 빈 결과.
+
+    Args:
+        ticker      : 6자리 종목코드.
+        target_date : 조회 영업일.
 
     Returns:
-        빈 DataFrame (columns = [ticker, datetime, open, high, low, close, volume]).
+        columns = [ticker, datetime, open, high, low, close, volume]
+        시간 정순.
     """
-    logger.debug("KR intraday placeholder: {} {}", ticker, target_date)
-    return pd.DataFrame(
-        columns=["ticker", "datetime", "open", "high", "low", "close", "volume"]
-    )
+    logger.debug("KR intraday fetch: {} {}", ticker, target_date)
+    df = kis_api.fetch_minute_chart_day(ticker, target_date)
+    if df.empty:
+        logger.warning("KR intraday 빈 결과: {} {}", ticker, target_date)
+    return df
 
 
 # ---------------------------------------------------------------------------

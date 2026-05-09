@@ -375,6 +375,15 @@ def fetch_financial_ratio(ticker: str, annual: bool = True) -> pd.DataFrame:
 _MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice"
 _MINUTE_CHART_TR = "FHKST03010230"
 
+# 영업시간 09:00~15:30(6.5h) 을 한 호출(~120 1분봉, 약 2h)씩 분할.
+# hour_end 가 "이 시점 이전" 120 분봉을 반환하므로, 다음과 같이 끝점을 잡으면
+# 합쳤을 때 09:00~15:30 모두 커버 + 약간 중복 (drop_duplicates 로 처리).
+#   110000 → 09:00~11:00 (120 분봉)
+#   130000 → 11:00~13:00
+#   150000 → 13:00~15:00
+#   153000 → 15:00~15:30 (30 분봉)
+_INTRADAY_HOUR_ENDS: list[str] = ["110000", "130000", "150000", "153000"]
+
 
 def fetch_minute_chart_chunk(
     ticker: str,
@@ -457,6 +466,49 @@ def fetch_minute_chart_chunk(
     # KIS 응답이 시간 역순(최신→과거) → 정순으로 정렬
     return (
         pd.DataFrame(rows)
+        .sort_values("datetime")
+        .reset_index(drop=True)
+    )
+
+
+def fetch_minute_chart_day(
+    ticker: str,
+    target_date: date,
+    include_premarket: bool = False,
+) -> pd.DataFrame:
+    """``target_date`` 영업시간 1분봉을 모두 받아 합친다 (정규 6.5h).
+
+    영업시간을 ``_INTRADAY_HOUR_ENDS`` 4개 끝점으로 분할 호출 후 합치기.
+    호출 사이에 약간의 중복은 ``drop_duplicates`` 로 제거.
+
+    휴장일/주말이면 모든 chunk 가 빈 응답 → 빈 DataFrame 반환.
+
+    Args:
+        ticker            : 6자리 종목코드.
+        target_date       : 조회 영업일.
+        include_premarket : 시간외(장전/장후) 포함 여부.
+
+    Returns:
+        columns = [ticker, datetime, open, high, low, close, volume]
+        정규 영업일 기준 ~390개 1분봉. 시간 정순.
+    """
+    chunks: list[pd.DataFrame] = []
+    for hour_end in _INTRADAY_HOUR_ENDS:
+        df = fetch_minute_chart_chunk(
+            ticker,
+            target_date,
+            hour_end=hour_end,
+            include_premarket=include_premarket,
+        )
+        if not df.empty:
+            chunks.append(df)
+
+    if not chunks:
+        return pd.DataFrame()
+
+    return (
+        pd.concat(chunks, ignore_index=True)
+        .drop_duplicates(subset=["ticker", "datetime"])
         .sort_values("datetime")
         .reset_index(drop=True)
     )

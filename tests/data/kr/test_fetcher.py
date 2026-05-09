@@ -156,11 +156,38 @@ class TestFetchFundamental:
 
 
 class TestFetchIntraday:
-    def test_intraday_returns_dataframe_with_correct_columns(self) -> None:
-        """60분봉 함수가 항상 올바른 컬럼을 가진 DataFrame을 반환한다 (현재 빈 결과)."""
-        from scanner.kr.fetcher import fetch_intraday
+    def test_delegates_to_kis_minute_chart_day(self, monkeypatch) -> None:
+        """fetch_intraday 가 kis_api.fetch_minute_chart_day 어댑터인지 검증."""
+        from scanner.kr import fetcher
+        import pandas as pd
 
-        df = fetch_intraday("005930", date.today())
-        assert isinstance(df, pd.DataFrame)
-        expected_cols = {"ticker", "datetime", "open", "high", "low", "close", "volume"}
-        assert expected_cols.issubset(set(df.columns))
+        called: list[tuple] = []
+
+        def mock_fetch(ticker, target_date, **kwargs):
+            called.append((ticker, target_date))
+            return pd.DataFrame({
+                "ticker": [ticker],
+                "datetime": [pd.Timestamp("2026-01-08 09:00:00")],
+                "open": [100.0], "high": [101.0], "low": [99.0],
+                "close": [100.5], "volume": [1000.0],
+            })
+
+        monkeypatch.setattr(fetcher.kis_api, "fetch_minute_chart_day", mock_fetch)
+
+        df = fetcher.fetch_intraday("005930", date(2026, 1, 8))
+
+        assert called == [("005930", date(2026, 1, 8))]
+        assert len(df) == 1
+        assert list(df.columns) == ["ticker", "datetime", "open", "high", "low", "close", "volume"]
+
+    def test_returns_empty_when_kis_returns_empty(self, monkeypatch) -> None:
+        """휴장일/실패 시 빈 DataFrame 그대로 반환."""
+        from scanner.kr import fetcher
+        import pandas as pd
+
+        monkeypatch.setattr(
+            fetcher.kis_api, "fetch_minute_chart_day",
+            lambda *a, **kw: pd.DataFrame(),
+        )
+        df = fetcher.fetch_intraday("005930", date(2026, 1, 4))  # 일요일
+        assert df.empty
