@@ -72,9 +72,7 @@ CONFIDENCE_THRESHOLD: float = 70.0  # 최종 리포트 채택 점수 (0~100)
 # 거래량 필터 (Liquidity)
 # ---------------------------------------------------------------------------
 
-MIN_AVG_TRADING_VALUE_KRW: float = 5_000_000_000        # 일평균 거래대금 50억원
-MIN_AVG_TRADING_VALUE_USD: float = 50_000_000           # 일평균 거래대금 5천만 USD
-LIQUIDITY_LOOKBACK_DAYS: int = 20                       # 평균 산출 구간
+LIQUIDITY_LOOKBACK_DAYS: int = 20                       # 거래량 base 평균 산출 구간
 RECENT_VOLUME_LOOKBACK_DAYS: int = 5                    # 최근 N일 평균 거래량 비교
 
 
