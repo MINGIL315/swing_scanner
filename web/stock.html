@@ -14,6 +14,9 @@
     .badge-side { background:#2b2a1c; color:#d29922; }
     .badge-down { background:#3a1c1c; color:#f85149; }
     .phase-card { border-left:3px solid var(--accent); padding:.75rem 1rem; background:#1c2128; border-radius:0 .5rem .5rem 0; margin-bottom:.5rem; }
+    .tf-btn { padding:2px 12px; border-radius:4px; background:#1c2128; color:#8b949e; font-size:.75rem; cursor:pointer; border:1px solid #30363d; }
+    .tf-btn.active { background:#58a6ff; color:white; border-color:#58a6ff; }
+    .tf-btn:hover:not(.active) { background:#21262d; color:#e6edf3; }
     .spinner { border:3px solid #30363d; border-top:3px solid var(--accent); border-radius:50%; width:1.5rem; height:1.5rem; animation:spin .7s linear infinite; }
     @keyframes spin { to{transform:rotate(360deg)} }
   </style>
@@ -42,7 +45,14 @@
 
   <!-- 통합 차트 — v5 panes (단일 chart 객체에 addSeries(type, opts, paneIndex)) -->
   <section class="card p-2">
-    <div id="chart-info-bar" class="flex flex-wrap items-center gap-3 px-2 pt-1 pb-2 text-xs text-gray-400 border-b border-gray-700"></div>
+    <!-- 차트 상단 정보 바 + 일/주봉 토글 -->
+    <div class="flex items-center gap-3 px-2 pt-1 pb-2 border-b border-gray-700">
+      <div class="flex gap-1">
+        <button id="tf-daily"  class="tf-btn active" onclick="setTimeFrame('daily')">일</button>
+        <button id="tf-weekly" class="tf-btn"        onclick="setTimeFrame('weekly')">주</button>
+      </div>
+      <div id="chart-info-bar" class="flex flex-wrap items-center gap-3 text-xs text-gray-400"></div>
+    </div>
     <div id="chart-main" style="height:600px;"></div>
   </section>
 
@@ -191,11 +201,65 @@ async function loadAnalysis() {
 let _priceLineParams = null;
 function setPriceLines(params) { _priceLineParams = params; }
 
+// 차트 series 핸들 + 응답 데이터 (일/주 토글 시 setData 만 호출하기 위해 보관)
+let _chartHandles = null;     // {chart, candleSeries, ma5, ma20, ma60, volSeries, rsiSeries, boundsSeries}
+let _ohlcvPayload = null;     // {daily: {...}, weekly: {...}}
+let _currentTF = 'daily';
+
+function setTimeFrame(tf) {
+  if (!_chartHandles || !_ohlcvPayload || !_ohlcvPayload[tf]) return;
+  _currentTF = tf;
+  _applyTimeFrame(tf);
+  // 버튼 active 표시
+  document.getElementById('tf-daily').classList.toggle('active', tf === 'daily');
+  document.getElementById('tf-weekly').classList.toggle('active', tf === 'weekly');
+}
+
+function _applyTimeFrame(tf) {
+  const d = _ohlcvPayload[tf];
+  const h = _chartHandles;
+  h.candleSeries.setData(d.candles || []);
+  if (h.ma5)  h.ma5.setData(d.ma5  || []);
+  if (h.ma20) h.ma20.setData(d.ma20 || []);
+  if (h.ma60) h.ma60.setData(d.ma60 || []);
+  if (h.volSeries) h.volSeries.setData(d.volume || []);
+  if (h.rsiSeries) h.rsiSeries.setData(d.rsi || []);
+  if (h.boundsSeries && d.rsi?.length) {
+    h.boundsSeries.setData([
+      { time: d.rsi[0].time, value: 0 },
+      { time: d.rsi[d.rsi.length - 1].time, value: 100 },
+    ]);
+  }
+  _renderInfoBar(d);
+  h.chart.timeScale().fitContent();
+}
+
+function _renderInfoBar(d) {
+  const lastCandle = (d.candles && d.candles[d.candles.length - 1]) || null;
+  const lastRsi    = (d.rsi && d.rsi[d.rsi.length - 1]) || null;
+  if (!lastCandle) return;
+  const fmt = (n) => Number(n).toLocaleString('ko-KR');
+  document.getElementById('chart-info-bar').innerHTML = `
+    <span class="font-semibold text-gray-200">${lastCandle.time}</span>
+    <span>O <span class="text-gray-200">${fmt(lastCandle.open)}</span></span>
+    <span>H <span class="text-gray-200">${fmt(lastCandle.high)}</span></span>
+    <span>L <span class="text-gray-200">${fmt(lastCandle.low)}</span></span>
+    <span>C <span class="text-gray-200">${fmt(lastCandle.close)}</span></span>
+    <span class="ml-3" style="color:#f0c040">● MA5</span>
+    <span style="color:#58a6ff">● MA20</span>
+    <span style="color:#ff7b72">● MA60</span>
+    ${lastRsi != null ? `<span class="ml-3" style="color:#a78bfa">RSI(14) ${lastRsi.value.toFixed(1)}</span>` : ''}
+  `;
+}
+
 async function loadChart() {
   // 3년치(≈750영업일) 가 DB 에 적재됨 → 적재된 만큼 모두 차트에 표시 (1000 = 충분한 buffer)
   const r = await fetch(`${API}/api/stocks/${ticker}/ohlcv?days=1000`);
   if (!r.ok) return;
-  const d = await r.json();
+  // 응답 형태: {daily: {candles, ma5, ma20, ma60, volume, rsi}, weekly: {...}}
+  _ohlcvPayload = await r.json();
+  const d = _ohlcvPayload[_currentTF] || _ohlcvPayload.daily;
+  if (!d) return;
 
   const el = document.getElementById('chart-main');
 
@@ -228,7 +292,7 @@ async function loadChart() {
     },
   });
 
-  // ── pane 0: 캔들 + MA ─────────────────────────────────────────
+  // ── pane 0: 캔들 + MA (series 핸들 보관 — 토글 시 setData 만 호출) ──
   const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
     upColor:'#3fb950', downColor:'#f85149',
     borderUpColor:'#3fb950', borderDownColor:'#f85149',
@@ -237,40 +301,45 @@ async function loadChart() {
   });
   candleSeries.setData(d.candles || []);
 
-  if (d.ma5?.length)  chart.addSeries(LightweightCharts.LineSeries, { color:'#f0c040', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma5);
-  if (d.ma20?.length) chart.addSeries(LightweightCharts.LineSeries, { color:'#58a6ff', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma20);
-  if (d.ma60?.length) chart.addSeries(LightweightCharts.LineSeries, { color:'#ff7b72', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma60);
+  const ma5  = chart.addSeries(LightweightCharts.LineSeries, { color:'#f0c040', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR });
+  const ma20 = chart.addSeries(LightweightCharts.LineSeries, { color:'#58a6ff', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR });
+  const ma60 = chart.addSeries(LightweightCharts.LineSeries, { color:'#ff7b72', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR });
+  if (d.ma5)  ma5.setData(d.ma5);
+  if (d.ma20) ma20.setData(d.ma20);
+  if (d.ma60) ma60.setData(d.ma60);
 
   // ── pane 1: 거래량 ─────────────────────────────────────────────
   const volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
-  }, 1);  // ← paneIndex
+  }, 1);
   volSeries.setData(d.volume || []);
 
   // ── pane 2: RSI (0~100 강제) ───────────────────────────────────
+  const rsiSeries = chart.addSeries(LightweightCharts.LineSeries, {
+    color:'#a78bfa', lineWidth:1, priceLineVisible:false,
+    priceFormat: { type: 'price', precision: 0, minMove: 1 },
+  }, 2);
+  if (d.rsi) rsiSeries.setData(d.rsi);
+  rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
+  rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
+
+  // 0~100 boundary (invisible) — pane 2 에 같이
+  const boundsSeries = chart.addSeries(LightweightCharts.LineSeries, {
+    color: 'rgba(0,0,0,0)',
+    lineWidth: 0,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  }, 2);
   if (d.rsi?.length) {
-    const rsiSeries = chart.addSeries(LightweightCharts.LineSeries, {
-      color:'#a78bfa', lineWidth:1, priceLineVisible:false,
-      priceFormat: { type: 'price', precision: 0, minMove: 1 },
-    }, 2);  // ← paneIndex
-    rsiSeries.setData(d.rsi);
-
-    rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
-    rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
-
-    // 0~100 boundary (invisible) — pane 2 에 같이
-    const boundsSeries = chart.addSeries(LightweightCharts.LineSeries, {
-      color: 'rgba(0,0,0,0)',
-      lineWidth: 0,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    }, 2);
     boundsSeries.setData([
       { time: d.rsi[0].time, value: 0 },
       { time: d.rsi[d.rsi.length - 1].time, value: 100 },
     ]);
   }
+
+  // 토글 시 재사용을 위해 핸들 보관
+  _chartHandles = { chart, candleSeries, ma5, ma20, ma60, volSeries, rsiSeries, boundsSeries };
 
   // ── pane 높이 (캔들 360 / 거래량 100 / RSI 120 = 총 580 + 분리선) ──
   try {
@@ -295,25 +364,10 @@ async function loadChart() {
   applyPriceLines();
   window._chartApplyPriceLines = applyPriceLines;
 
-  // ── 차트 상단 정보 바 ──────────────────────────────────────────
-  const lastCandle = (d.candles && d.candles[d.candles.length - 1]) || null;
-  const lastRsi    = (d.rsi && d.rsi[d.rsi.length - 1]) || null;
-  if (lastCandle) {
-    const fmt = (n) => Number(n).toLocaleString('ko-KR');
-    document.getElementById('chart-info-bar').innerHTML = `
-      <span class="font-semibold text-gray-200">${lastCandle.time}</span>
-      <span>O <span class="text-gray-200">${fmt(lastCandle.open)}</span></span>
-      <span>H <span class="text-gray-200">${fmt(lastCandle.high)}</span></span>
-      <span>L <span class="text-gray-200">${fmt(lastCandle.low)}</span></span>
-      <span>C <span class="text-gray-200">${fmt(lastCandle.close)}</span></span>
-      <span class="ml-3" style="color:#f0c040">● MA5</span>
-      <span style="color:#58a6ff">● MA20</span>
-      <span style="color:#ff7b72">● MA60</span>
-      ${lastRsi != null ? `<span class="ml-3" style="color:#a78bfa">RSI(14) ${lastRsi.value.toFixed(1)}</span>` : ''}
-    `;
-  }
-
+  // 정보 바 + fit
+  _renderInfoBar(d);
   chart.timeScale().fitContent();
+
   window.addEventListener('resize', () => {
     chart.resize(el.offsetWidth, 600);
   });

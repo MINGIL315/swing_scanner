@@ -77,10 +77,9 @@ def stock_ohlcv(
         for r in rows
     ])
 
-    # _build_ohlcv_json 은 {"daily": {...}, "weekly": {...}} 형태로 반환 (HTML 리포트용).
-    # web/stock.html 의 JS 는 평탄 구조(candles/ma5/.../rsi) 를 기대하므로 daily 만 추출.
-    payload = json.loads(_build_ohlcv_json(df))
-    return payload.get("daily", payload)
+    # {"daily": {candles, ma5, ma20, ma60, volume, rsi}, "weekly": {...}} 형태.
+    # web/stock.html 의 일/주봉 토글이 daily/weekly 둘 다 사용.
+    return json.loads(_build_ohlcv_json(df))
 
 
 @router.get("/stocks/{ticker}/analysis")
