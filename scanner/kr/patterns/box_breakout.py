@@ -168,6 +168,8 @@ class BoxBreakoutDetector(PatternDetector):
             "range_pct": round(box.range_pct * 100, 4),
             "breakout_idx": box.breakout_idx,
             "vol_ratio_at_break": round(cross_vol_ratio, 4),
+            # scorer.py 가 details["vol_ratio"] 키를 찾는다 — 거래량 점수 (20% 가중치)
+            "vol_ratio": round(cross_vol_ratio, 4),
         }
 
         return PatternResult(

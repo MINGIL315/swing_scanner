@@ -65,7 +65,7 @@ CONFIDENCE_WEIGHTS: dict[str, float] = {
     "rsi": 0.10,             # RSI 정상 범위
 }
 
-CONFIDENCE_THRESHOLD: float = 70.0  # 최종 리포트 채택 점수 (0~100)
+CONFIDENCE_THRESHOLD: float = 75.0  # 최종 리포트 채택 점수 (0~100). vol_ratio 키 통일로 max 100점 정상화 후 컷 상향 (이전 70 = max 80 기준의 87.5% → 75 = max 100 기준의 75%)
 
 
 # ---------------------------------------------------------------------------
