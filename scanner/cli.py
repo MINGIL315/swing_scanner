@@ -105,8 +105,18 @@ def fetch_all(
         help="수집할 시장: kr | us | all",
     ),
     days: int = typer.Option(365, "--days", "-d", help="과거 몇 일치 데이터 수집"),
+    with_intraday: bool = typer.Option(
+        False,
+        "--with-intraday",
+        help="KR 종목의 1분봉도 함께 수집 (4시간봉 합성 원천 데이터)",
+    ),
+    intraday_days: int = typer.Option(
+        10,
+        "--intraday-days",
+        help="--with-intraday 사용 시 분봉 수집 영업일 수 (default 10)",
+    ),
 ) -> None:
-    """모든 활성 종목의 OHLCV + 재무 데이터를 일괄 수집한다."""
+    """모든 활성 종목의 OHLCV + 재무 (+ 선택적 분봉) 데이터를 일괄 수집한다."""
     from datetime import date, timedelta
 
     from scanner.config import setup_logger
@@ -118,7 +128,13 @@ def fetch_all(
 
     today = date.today()
     start = today - timedelta(days=days)
-    run_data_pipeline(market=market.upper(), start=start, end=today)
+    run_data_pipeline(
+        market=market.upper(),
+        start=start,
+        end=today,
+        with_intraday=with_intraday,
+        intraday_lookback_days=intraday_days,
+    )
 
 
 @app.command("test-pattern")
