@@ -270,12 +270,23 @@ def _to_weekly(daily_df: pd.DataFrame) -> pd.DataFrame:
     return weekly
 
 
-def _build_tf_payload(df: pd.DataFrame) -> dict[str, list]:
-    """주어진 OHLCV DataFrame에서 차트용 dict({candles, volume, ma5/20/60, rsi})를 만든다."""
+def _build_tf_payload(df: pd.DataFrame, time_col: str = "date") -> dict[str, list]:
+    """주어진 OHLCV DataFrame에서 차트용 dict({candles, volume, ma5/20/60, rsi})를 만든다.
+
+    Args:
+        df       : open/high/low/close/volume + 시간 컬럼 (date 또는 datetime).
+        time_col : 시간 컬럼명. 일/주봉은 'date', 분봉/4시간봉은 'datetime'.
+    """
     if df.empty:
         return {k: [] for k in _EMPTY_TF}
 
-    dates = df["date"].tolist()
+    def _serialize_time(t):
+        # date → 'YYYY-MM-DD', datetime → 'YYYY-MM-DDTHH:MM:SS' (LightweightCharts 호환)
+        if hasattr(t, "isoformat"):
+            return t.isoformat()
+        return str(t)
+
+    times = [_serialize_time(t) for t in df[time_col].tolist()]
     close = df["close"].reset_index(drop=True)
 
     ma5  = sma(close, 5)
@@ -288,26 +299,26 @@ def _build_tf_payload(df: pd.DataFrame) -> dict[str, list]:
         for i, val in enumerate(series.tolist()):
             if val is None or (isinstance(val, float) and math.isnan(val)):
                 continue
-            out.append({"time": dates[i], "value": round(float(val), 4)})
+            out.append({"time": times[i], "value": round(float(val), 4)})
         return out
 
     candles = [
         {
-            "time":  row["date"],
+            "time":  times[i],
             "open":  row["open"],
             "high":  row["high"],
             "low":   row["low"],
             "close": row["close"],
         }
-        for _, row in df.iterrows()
+        for i, (_, row) in enumerate(df.iterrows())
     ]
     volume = [
         {
-            "time":  row["date"],
+            "time":  times[i],
             "value": row["volume"],
             "color": "#3fb950" if row["close"] >= row["open"] else "#f85149",
         }
-        for _, row in df.iterrows()
+        for i, (_, row) in enumerate(df.iterrows())
     ]
 
     return {
@@ -320,19 +331,21 @@ def _build_tf_payload(df: pd.DataFrame) -> dict[str, list]:
     }
 
 
-def _build_ohlcv_json(df: pd.DataFrame) -> str:
-    """일봉 DataFrame을 받아 일/주봉 페이로드를 묶은 JSON 문자열을 반환한다.
+def _build_ohlcv_json(
+    df: pd.DataFrame,
+    intraday_4h_df: pd.DataFrame | None = None,
+) -> str:
+    """일봉 + (옵션) 4시간봉 페이로드를 묶은 JSON 문자열을 반환한다.
 
-    출력 구조: {"daily": {...}, "weekly": {...}}
-    - daily : 입력 그대로
-    - weekly: _resample_weekly() 리샘플 결과
+    출력 구조: {"daily": {...}, "weekly": {...}, "4h": {...}}  (4h 는 옵션)
     """
-    daily_payload  = _build_tf_payload(df)
-    weekly_payload = _build_tf_payload(_to_weekly(df))
-    return json.dumps(
-        {"daily": daily_payload, "weekly": weekly_payload},
-        ensure_ascii=False,
-    )
+    payload: dict[str, dict] = {
+        "daily":  _build_tf_payload(df, time_col="date"),
+        "weekly": _build_tf_payload(_to_weekly(df), time_col="date"),
+    }
+    if intraday_4h_df is not None and not intraday_4h_df.empty:
+        payload["4h"] = _build_tf_payload(intraday_4h_df, time_col="datetime")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 __all__ = ["generate_daily_report", "PATTERN_LABELS"]

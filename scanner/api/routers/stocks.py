@@ -38,8 +38,10 @@ def stock_ohlcv(
     ticker: str,
     days: int = Query(default=1000, ge=10, le=2000, description="최근 N영업일치 (default=1000 ≈ 약 4년)"),
 ) -> dict[str, Any]:
-    """일봉 OHLCV + 이동평균 + RSI 를 반환한다."""
-    from scanner.db.models import OHLCVDaily
+    """일봉 + 주봉 + (KR 만) 4시간봉 OHLCV 차트 데이터를 반환한다."""
+    from datetime import datetime, time as time_t, timedelta
+
+    from scanner.db.models import OHLCVDaily, OHLCVIntraday
     import json
     import pandas as pd
 
@@ -55,6 +57,21 @@ def stock_ohlcv(
                 .limit(days)
             ).scalars().all()
         )
+
+        # KR 종목이면 OHLCVIntraday 1분봉도 로드 (최근 30일치)
+        intraday_rows: list[OHLCVIntraday] = []
+        if market == "KR":
+            cutoff = datetime.combine(
+                date.today() - timedelta(days=30), time_t.min
+            )
+            intraday_rows = list(
+                session.execute(
+                    select(OHLCVIntraday)
+                    .where(OHLCVIntraday.ticker == ticker)
+                    .where(OHLCVIntraday.datetime >= cutoff)
+                    .order_by(OHLCVIntraday.datetime)
+                ).scalars().all()
+            )
 
     if market == "KR":
         from scanner.kr.reports.html_report import _build_ohlcv_json
@@ -77,9 +94,27 @@ def stock_ohlcv(
         for r in rows
     ])
 
-    # {"daily": {candles, ma5, ma20, ma60, volume, rsi}, "weekly": {...}} 형태.
-    # web/stock.html 의 일/주봉 토글이 daily/weekly 둘 다 사용.
-    return json.loads(_build_ohlcv_json(df))
+    # KR 분봉 → 4시간봉 합성 (적재된 분봉이 있을 때만)
+    intraday_4h_df: pd.DataFrame | None = None
+    if intraday_rows:
+        from scanner.kr.intraday import resample_to_minutes
+
+        df_1min = pd.DataFrame([
+            {
+                "ticker":   r.ticker,
+                "datetime": r.datetime,
+                "open":     r.open,
+                "high":     r.high,
+                "low":      r.low,
+                "close":    r.close,
+                "volume":   r.volume,
+            }
+            for r in intraday_rows
+        ])
+        intraday_4h_df = resample_to_minutes(df_1min, rule="4h", drop_partial=False)
+
+    # {"daily": {...}, "weekly": {...}, "4h": {...}(KR+분봉적재시)} 형태
+    return json.loads(_build_ohlcv_json(df, intraday_4h_df=intraday_4h_df))
 
 
 @router.get("/stocks/{ticker}/analysis")
@@ -145,6 +180,12 @@ def stock_analysis(
             "risk_reward_ratio": r.risk_reward_ratio,
             "trend_weekly":      r.trend_weekly,
             "passed_filters":    r.passed_filters,
+            # Phase C-3b 진입 타이밍 신호 (4시간봉 = 60분봉 기반 평가)
+            "entry_signal_strength": (
+                round(r.entry_signal_strength, 1)
+                if r.entry_signal_strength is not None else None
+            ),
+            "entry_signals":     r.entry_signals,  # dict[str, bool] 또는 None
             "ai_comment":        generate_comment(row_dict),
         })
 
