@@ -166,17 +166,17 @@ class DoubleBottomDetector(PatternDetector):
     ) -> EntrySignal:
         """진입 신호 4가지를 평가한다 (각 25점).
 
-        1. RSI 반등 (60분봉 없으면 일봉 RSI < 50에서 상승)
-        2. 거래량 양봉 (종가 > 시가 + 거래량 양봉)
-        3. MACD 상향 (히스토그램 양전환)
-        4. 직전 고점 돌파 (최근 20일 고점 돌파)
+        1. RSI 반등 (4시간봉 RSI < 50에서 상승. 4h 없으면 일봉)
+        2. 거래량 양봉 (4시간봉 양봉 + 거래량 > 직전 5봉 평균)
+        3. MACD 상향 (일봉 히스토그램 양전환 — 4h 봉 데이터 부족)
+        4. 직전 고점 돌파 (일봉 최근 20일 고점 돌파)
         """
         signals: dict[str, bool] = {}
 
         close = df["close"]
         open_ = df["open"] if "open" in df.columns else close
 
-        # 1. RSI 반등
+        # 1. RSI 반등 (4시간봉)
         rsi_src = intraday_df["close"] if intraday_df is not None else close
         rsi_vals = rsi(rsi_src, 14)
         if len(rsi_vals.dropna()) >= 2:
@@ -186,15 +186,19 @@ class DoubleBottomDetector(PatternDetector):
         else:
             signals["rsi_bounce"] = False
 
-        # 2. 거래량 양봉
-        last_close = float(close.iloc[-1])
-        last_open = float(open_.iloc[-1])
-        if "volume" in df.columns and len(df) > 5:
-            avg_vol = float(df["volume"].tail(5).mean())
-            last_vol = float(df["volume"].iloc[-1])
-            signals["bullish_volume"] = (last_close > last_open) and (last_vol > avg_vol)
+        # 2. 거래량 양봉 (4시간봉 — 진입 타이밍 평가)
+        vol_src = intraday_df if intraday_df is not None else df
+        if "volume" in vol_src.columns and len(vol_src) > 5:
+            src_close = float(vol_src["close"].iloc[-1])
+            src_open = float(vol_src["open"].iloc[-1]) if "open" in vol_src.columns else src_close
+            avg_vol = float(vol_src["volume"].tail(5).mean())
+            last_vol = float(vol_src["volume"].iloc[-1])
+            signals["bullish_volume"] = (src_close > src_open) and (last_vol > avg_vol)
         else:
-            signals["bullish_volume"] = last_close > last_open
+            signals["bullish_volume"] = float(close.iloc[-1]) > float(open_.iloc[-1])
+
+        # 일봉 컨텍스트 (MACD·고점 돌파)
+        last_close = float(close.iloc[-1])
 
         # 3. MACD 히스토그램 양전환
         if len(close) >= 35:

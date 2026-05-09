@@ -412,6 +412,7 @@ def scan(
     from scanner.pipeline import (
         _load_daily_dfs,
         _load_fundamentals,
+        _load_intraday_dfs,
         _load_market_map,
         _maybe_update_universe,
     )
@@ -474,7 +475,11 @@ def scan(
     daily_dfs = _load_daily_dfs(tickers)
     market_map = _load_market_map(tickers)
     fundamentals_map = _load_fundamentals(tickers) if with_fundamental_filter else None
-    logger.info("데이터 로드 완료: {}개 종목", len(daily_dfs))
+    intraday_dfs = _load_intraday_dfs(tickers, market_map)
+    logger.info(
+        "데이터 로드 완료: {}개 종목 (4시간봉 {}개)",
+        len(daily_dfs), len(intraday_dfs),
+    )
 
     # ── Phase 3: 패턴 탐지 (Ctrl+C 시 완료분 부분 저장) ─────────────
     logger.info("Phase 3 진입: 패턴 탐지 ({}종목, workers={})", len(daily_dfs), FETCH_MAX_WORKERS)
@@ -504,6 +509,7 @@ def scan(
                         market_map.get(t, "US"),
                         daily_dfs[t],
                         fundamentals_map.get(t) if fundamentals_map else None,
+                        intraday_dfs.get(t) if intraday_dfs else None,
                     ): t
                     for t in daily_dfs
                 }
