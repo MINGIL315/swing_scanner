@@ -35,7 +35,13 @@ from scanner.config import FETCH_MAX_WORKERS, OHLCV_LOOKBACK_DAYS, settings
 from scanner.kr import fetcher as kr_fetcher
 from scanner.us import fetcher as us_fetcher
 from scanner.db.universe_db import get_active_tickers
-from scanner.db.models import Fundamental, OHLCVDaily, OHLCVWeekly, Universe
+from scanner.db.models import (
+    Fundamental,
+    OHLCVDaily,
+    OHLCVIntraday,
+    OHLCVWeekly,
+    Universe,
+)
 from scanner.db.session import get_session
 
 console = Console()
@@ -130,6 +136,22 @@ def _upsert_fundamental(rows: list[dict]) -> None:
             sess.execute(stmt)
 
 
+def _upsert_ohlcv_intraday(rows: list[dict]) -> None:
+    if not rows:
+        return
+    with get_session() as sess:
+        for row in rows:
+            stmt = (
+                sqlite_insert(OHLCVIntraday)
+                .values(**row)
+                .on_conflict_do_update(
+                    index_elements=["ticker", "datetime"],
+                    set_={k: row[k] for k in row if k not in ("id",)},
+                )
+            )
+            sess.execute(stmt)
+
+
 def _df_to_dicts(df: pd.DataFrame) -> list[dict]:
     if df.empty:
         return []
@@ -166,6 +188,31 @@ def _fetch_ohlcv_one(
     except Exception as exc:
         msg = str(exc)
         logger.error("OHLCV fetch 실패 {}: {}", ticker, msg)
+        return ticker, False, msg
+
+
+def _fetch_intraday_one(
+    ticker: str,
+    market: str,
+    target_date: date,
+) -> tuple[str, bool, str]:
+    """단일 종목의 ``target_date`` 1분봉을 fetch 후 DB에 저장한다.
+
+    KR 만 지원 (US 의 분봉 활성화는 별도 작업).
+
+    Returns:
+        (ticker, success, error_message)
+    """
+    if market != "KR":
+        return ticker, True, ""  # US 는 현재 분봉 미수집
+
+    try:
+        df = kr_fetcher.fetch_intraday(ticker, target_date)
+        _upsert_ohlcv_intraday(_df_to_dicts(df))
+        return ticker, True, ""
+    except Exception as exc:
+        msg = str(exc)
+        logger.error("Intraday fetch 실패 {} {}: {}", ticker, target_date, msg)
         return ticker, False, msg
 
 
@@ -343,17 +390,94 @@ def fetch_all_fundamentals(
     return {"success": success_count, "failed": failed_count}
 
 
+def fetch_all_intraday(
+    market: str = "KR",
+    target_dates: list[date] | None = None,
+) -> dict[str, int]:
+    """모든 활성 KR 종목의 1분봉을 ``target_dates`` 각각에 대해 수집한다.
+
+    KIS 분봉 API 는 KR 만 지원하므로 KR 만 동작 (US 는 무시).
+    종목 × 일자 조합으로 fetch — 각 일자별 약 4 KIS 호출 (영업시간 4 chunk).
+
+    Args:
+        market       : "KR" / "US" / "ALL". US 는 현재 분봉 미수집.
+        target_dates : 수집 대상 영업일 목록. ``None`` 이면 오늘 1일치만.
+
+    Returns:
+        ``{"success": N, "failed": M, "skipped": K}`` — N = (종목 × 일자) 성공 건수.
+    """
+    if market.upper() == "US":
+        logger.info("US 는 분봉 수집 미지원 — skip")
+        return {"success": 0, "failed": 0, "skipped": 0}
+
+    if target_dates is None:
+        target_dates = [date.today()]
+
+    tickers = get_active_tickers("KR")  # type: ignore[arg-type]
+    if not tickers:
+        logger.warning("활성 KR 종목이 없습니다.")
+        return {"success": 0, "failed": 0, "skipped": 0}
+
+    logger.info(
+        "분봉 수집 시작: {} 종목 × {} 일자",
+        len(tickers), len(target_dates),
+    )
+
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+
+    tasks: list[tuple[str, date]] = [
+        (t, d) for t in tickers for d in target_dates
+    ]
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task_id = progress.add_task("분봉 수집 중...", total=len(tasks))
+
+        with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(_fetch_intraday_one, ticker, "KR", target_date): (ticker, target_date)
+                for ticker, target_date in tasks
+            }
+            for future in as_completed(futures):
+                ticker_done, ok, err = future.result()
+                if ok:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                    _append_failed(date.today(), ticker_done, err)
+                progress.advance(task_id)
+
+    logger.info(
+        "분봉 수집 완료 — 성공: {}, 실패: {}, 스킵: {}",
+        success_count, failed_count, skipped_count,
+    )
+    return {"success": success_count, "failed": failed_count, "skipped": skipped_count}
+
+
 def run_data_pipeline(
     market: str = "ALL",
     start: date | None = None,
     end: date | None = None,
+    with_intraday: bool = False,
+    intraday_lookback_days: int = 10,
 ) -> None:
-    """OHLCV → 재무 순서로 전체 데이터 파이프라인을 실행한다.
+    """OHLCV → 재무 → (선택) 분봉 순서로 전체 데이터 파이프라인을 실행한다.
 
     Args:
-        market: "KR", "US", "ALL".
-        start : OHLCV 수집 시작일.
-        end   : OHLCV 수집 종료일.
+        market                : "KR", "US", "ALL".
+        start                 : OHLCV 수집 시작일.
+        end                   : OHLCV 수집 종료일.
+        with_intraday         : True 면 KR 종목 1분봉도 수집 (기본 최근 10영업일).
+        intraday_lookback_days: 분봉 수집 영업일 수 (with_intraday=True 일 때).
     """
     console.print("[bold cyan]== 데이터 파이프라인 시작 ==[/bold cyan]")
     ohlcv_result = fetch_all_ohlcv(market=market, start=start, end=end)
@@ -367,4 +491,19 @@ def run_data_pipeline(
         f"[green]재무[/green] 성공={fund_result['success']} "
         f"실패={fund_result['failed']}"
     )
+
+    if with_intraday and market.upper() in ("KR", "ALL"):
+        # 최근 N 영업일 기준으로 단순 캘린더 거꾸로 (영업일/주말 정확 판정은 KIS 측에서)
+        today = date.today()
+        target_dates = [
+            today - timedelta(days=i)
+            for i in range(intraday_lookback_days)
+        ]
+        intraday_result = fetch_all_intraday(market="KR", target_dates=target_dates)
+        console.print(
+            f"[green]분봉[/green] 성공={intraday_result['success']} "
+            f"실패={intraday_result['failed']} "
+            f"({intraday_lookback_days}영업일 시도)"
+        )
+
     console.print("[bold cyan]== 파이프라인 완료 ==[/bold cyan]")
