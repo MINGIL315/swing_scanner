@@ -486,3 +486,83 @@ class TestFetchMinuteChartChunk:
         # 정상 1개만 남음
         assert len(df) == 1
         assert df.iloc[0]["datetime"].strftime("%H%M%S") == "140000"
+
+
+# ---------------------------------------------------------------------------
+# fetch_minute_chart_day (영업시간 4 chunk 페이징)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchMinuteChartDay:
+    def test_combines_chunks_drop_duplicates_sort(self, monkeypatch):
+        """4 chunk 호출을 합쳐 중복 제거 + 정순 정렬한다."""
+        _seed_token_cache()
+
+        # chunk 별 호출 시 다른 시간대 분봉 반환 (끝점 근처에 약간 중복)
+        chunk_data = {
+            "110000": [
+                ("20260108", "110000", 100, 100, 100, 100, 1),
+                ("20260108", "105900", 99, 100, 99, 100, 1),
+                ("20260108", "100000", 95, 96, 95, 96, 1),
+            ],
+            "130000": [
+                ("20260108", "130000", 105, 105, 105, 105, 1),
+                ("20260108", "115900", 100, 101, 100, 101, 1),
+                ("20260108", "110000", 100, 100, 100, 100, 1),  # ← 중복 (이전 chunk 와)
+            ],
+            "150000": [
+                ("20260108", "150000", 110, 110, 110, 110, 1),
+                ("20260108", "135900", 105, 106, 105, 106, 1),
+                ("20260108", "130000", 105, 105, 105, 105, 1),  # ← 중복
+            ],
+            "153000": [
+                ("20260108", "153000", 112, 112, 112, 112, 1),
+                ("20260108", "152900", 111, 112, 111, 112, 1),
+                ("20260108", "150000", 110, 110, 110, 110, 1),  # ← 중복
+            ],
+        }
+
+        def fake_request(method, url, **kwargs):
+            hour_end = kwargs["params"]["FID_INPUT_HOUR_1"]
+            return _make_response(_sample_minute_response(chunk_data[hour_end]))
+
+        monkeypatch.setattr(kis_api.httpx, "request", fake_request)
+
+        df = kis_api.fetch_minute_chart_day("005930", date(2026, 1, 8))
+
+        # 중복 제거 후: 100000, 105900, 110000, 115900, 130000, 135900, 150000, 152900, 153000 = 9개
+        assert len(df) == 9
+        # 정순 정렬
+        times = df["datetime"].dt.strftime("%H%M%S").tolist()
+        assert times == sorted(times)
+        assert times[0] == "100000"
+        assert times[-1] == "153000"
+
+    def test_calls_4_chunks_with_correct_hours(self, monkeypatch):
+        """4번 호출되며 hour_end 가 _INTRADAY_HOUR_ENDS 그대로."""
+        _seed_token_cache()
+        called_hours: list[str] = []
+
+        def fake_request(method, url, **kwargs):
+            called_hours.append(kwargs["params"]["FID_INPUT_HOUR_1"])
+            return _make_response(_sample_minute_response([]))
+
+        monkeypatch.setattr(kis_api.httpx, "request", fake_request)
+
+        kis_api.fetch_minute_chart_day("005930", date(2026, 1, 8))
+
+        assert called_hours == ["110000", "130000", "150000", "153000"]
+
+    def test_returns_empty_when_all_chunks_empty(self, monkeypatch):
+        """휴장일이면 4 chunk 모두 빈 응답 → 빈 DataFrame."""
+        _seed_token_cache()
+        mock_request = MagicMock(
+            return_value=_make_response({
+                "rt_cd": "0", "msg1": "정상",
+                "output1": {}, "output2": [],
+            })
+        )
+        monkeypatch.setattr(kis_api.httpx, "request", mock_request)
+
+        df = kis_api.fetch_minute_chart_day("005930", date(2026, 1, 4))  # 일요일
+        assert df.empty
