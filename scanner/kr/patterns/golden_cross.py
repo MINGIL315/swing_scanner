@@ -17,6 +17,7 @@ from scanner.kr.indicators.moving_average import sma
 from scanner.kr.indicators.rsi import rsi
 from scanner.kr.indicators.volume import volume_ratio
 from scanner.kr.patterns.base import EntrySignal, PatternDetector, PatternResult
+from scanner.kr.quote_align import align_to_tick
 
 # MA60 기울기 판정 기간/임계값
 _SLOPE_WINDOW: int = 20
@@ -137,9 +138,9 @@ class GoldenCrossDetector(PatternDetector):
             pattern_name=self.name,
             ticker=ticker,
             detected_at=detected_at,
-            entry_price=round(entry_price, 4),
-            stop_loss=round(stop_loss, 4),
-            target_price=round(target_price, 4),
+            entry_price=align_to_tick(entry_price),
+            stop_loss=align_to_tick(stop_loss),
+            target_price=align_to_tick(target_price),
             risk_reward_ratio=rr,
             raw_score=round(raw_score, 2),
             details=details,
