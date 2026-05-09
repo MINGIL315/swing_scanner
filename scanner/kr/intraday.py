@@ -88,7 +88,8 @@ def resample_to_minutes(
             full_index = counts[counts >= bar_minutes].index
             grouped = grouped.loc[grouped.index.isin(full_index)]
 
-    grouped = grouped.dropna(how="all").reset_index()
+    # OHLC 중 하나라도 NaN 인 봉은 drop (빈 시간대/부분 봉의 일부 결측)
+    grouped = grouped.dropna(subset=["open", "high", "low", "close"]).reset_index()
 
     if ticker is not None:
         grouped.insert(0, "ticker", ticker)

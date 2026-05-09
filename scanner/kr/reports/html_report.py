@@ -276,12 +276,25 @@ def _build_tf_payload(df: pd.DataFrame, time_col: str = "date") -> dict[str, lis
     Args:
         df       : open/high/low/close/volume + 시간 컬럼 (date 또는 datetime).
         time_col : 시간 컬럼명. 일/주봉은 'date', 분봉/4시간봉은 'datetime'.
+
+    LightweightCharts 호환:
+      - date     → 'YYYY-MM-DD' string (BusinessDay 자동 인식)
+      - datetime → UNIX timestamp(int) + KST offset(+9h) — 차트의 UTC 표시값이
+                   실제 KST 시각이 되도록 시프트
     """
     if df.empty:
         return {k: [] for k in _EMPTY_TF}
 
+    import datetime as _dt
+    _KST_OFFSET_SEC = 9 * 3600
+
     def _serialize_time(t):
-        # date → 'YYYY-MM-DD', datetime → 'YYYY-MM-DDTHH:MM:SS' (LightweightCharts 호환)
+        # datetime → UNIX timestamp + KST offset (UTC 표시값이 KST 시각으로 나타남)
+        if isinstance(t, _dt.datetime):
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=_dt.timezone(_dt.timedelta(hours=9)))
+            return int(t.timestamp()) + _KST_OFFSET_SEC
+        # date → 'YYYY-MM-DD' string
         if hasattr(t, "isoformat"):
             return t.isoformat()
         return str(t)
