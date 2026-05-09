@@ -185,16 +185,16 @@ class BoxBreakoutDetector(PatternDetector):
     ) -> EntrySignal:
         """진입 신호 4가지를 평가한다 (각 25점).
 
-        1. RSI 50 돌파 (상향)
-        2. 거래량 양봉
-        3. MACD 히스토그램 양전환
-        4. 돌파 후 되돌림 없음 (종가 > 박스 상단)
+        1. RSI 50 돌파 (4시간봉 RSI 가 50 을 상향 돌파)
+        2. 거래량 양봉 (4시간봉 양봉 + 거래량 > 직전 5봉 평균)
+        3. MACD 히스토그램 양전환 (일봉 — 4h 봉 데이터 부족)
+        4. 돌파 후 되돌림 없음 (일봉 종가 > 일봉 박스 상단)
         """
         signals: dict[str, bool] = {}
         close = df["close"]
         open_ = df["open"] if "open" in df.columns else close
 
-        # 1. RSI 50 돌파
+        # 1. RSI 50 돌파 (4시간봉)
         rsi_src = intraday_df["close"] if intraday_df is not None else close
         rsi_vals = rsi(rsi_src, 14).dropna()
         if len(rsi_vals) >= 2:
@@ -204,17 +204,21 @@ class BoxBreakoutDetector(PatternDetector):
         else:
             signals["rsi_above_50"] = False
 
-        # 2. 거래량 양봉
-        last_close = float(close.iloc[-1])
-        last_open  = float(open_.iloc[-1])
-        if "volume" in df.columns and len(df) > 5:
-            avg_vol = float(df["volume"].tail(5).mean())
+        # 2. 거래량 양봉 (4시간봉)
+        vol_src = intraday_df if intraday_df is not None else df
+        if "volume" in vol_src.columns and len(vol_src) > 5:
+            src_close = float(vol_src["close"].iloc[-1])
+            src_open = float(vol_src["open"].iloc[-1]) if "open" in vol_src.columns else src_close
+            avg_vol = float(vol_src["volume"].tail(5).mean())
             signals["bullish_volume"] = (
-                last_close > last_open
-                and float(df["volume"].iloc[-1]) > avg_vol
+                src_close > src_open
+                and float(vol_src["volume"].iloc[-1]) > avg_vol
             )
         else:
-            signals["bullish_volume"] = last_close > last_open
+            signals["bullish_volume"] = float(close.iloc[-1]) > float(open_.iloc[-1])
+
+        # 일봉 컨텍스트 (MACD·박스 상단)
+        last_close = float(close.iloc[-1])
 
         # 3. MACD 히스토그램 양전환
         if len(close) >= 35:

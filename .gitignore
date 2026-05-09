@@ -39,3 +39,9 @@ data/exports/
 # OS
 .DS_Store
 Thumbs.db
+
+# 생성형 문서 (재생성 가능한 결과물 — scripts/generate_kr_module_doc.py 로 만듦)
+KR_모듈_흐름.docx
+
+# Office 열림 시 만드는 임시 파일
+~$*
