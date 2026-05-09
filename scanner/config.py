@@ -37,7 +37,7 @@ GOLDEN_CROSS_VOLUME_RATIO: float = 1.2         # 돌파일 거래량 / 20일 평
 # 박스권 돌파 (Box Breakout)
 BOX_BREAKOUT_MIN_DAYS: int = 30                # 박스 형성 최소 일수
 BOX_BREAKOUT_MAX_DAYS: int = 60                # 박스 형성 최대 일수
-BOX_BREAKOUT_RANGE_PCT: float = 0.10           # 박스 폭 (±10%)
+BOX_BREAKOUT_RANGE_PCT: float = 0.15           # 박스 폭 (종가 기반, KOSPI 현실 반영)
 BOX_BREAKOUT_RECENT_DAYS: int = 3              # 최근 N일 내 돌파
 BOX_BREAKOUT_BREAK_PCT: float = 0.01           # 박스 상단 대비 +1% 이상
 BOX_BREAKOUT_VOLUME_RATIO: float = 1.5         # 돌파일 거래량 / 20일 평균
