@@ -136,6 +136,11 @@ class DoubleBottomDetector(PatternDetector):
         else:
             detected_at = date.today()
 
+        # 목선 돌파일 거래량 / 직전 20일 평균 (scorer.py 의 거래량 점수 입력)
+        last_vol = float(window["volume"].iloc[-1])
+        avg_20d_vol = float(window["volume"].iloc[-21:-1].mean()) if len(window) >= 21 else 0.0
+        last_vol_ratio = last_vol / avg_20d_vol if avg_20d_vol > 0 else 0.0
+
         details: dict[str, Any] = {
             "trough_prices": trough_prices.tolist(),
             "avg_low": round(avg_low, 4),
@@ -145,6 +150,8 @@ class DoubleBottomDetector(PatternDetector):
             "first_low": round(first_low, 4),
             "last_low": round(last_low, 4),
             "last_first_low_ratio": round(last_low / first_low, 4) if first_low > 0 else 0.0,
+            # scorer.py 가 details["vol_ratio"] 키를 찾는다 — 거래량 점수 (20% 가중치)
+            "vol_ratio": round(last_vol_ratio, 4),
         }
 
         return PatternResult(

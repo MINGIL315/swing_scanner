@@ -369,7 +369,7 @@ def scan(
         help="패턴 필터 (쉼표 구분, 예: pullback,box_breakout)",
     ),
     min_confidence: float = typer.Option(
-        70.0, "--min-confidence", help="최소 신뢰도 점수 (0~100)",
+        75.0, "--min-confidence", help="최소 신뢰도 점수 (0~100)",
     ),
     no_volume_filter: bool = typer.Option(
         False, "--no-volume-filter", help="거래량 필터 비활성화",

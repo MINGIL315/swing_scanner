@@ -502,19 +502,19 @@ def build() -> Path:
         ],
         col_widths_cm=[5.5, 2.0, 9.0],
     )
-    _add_para(doc, "주의 — 거래량 점수의 입력 vol_ratio 는 detector.details['vol_ratio'] 에서 가져온다. 패턴별로 의미가 약간 다름:", italic=True)
+    _add_para(doc, "거래량 점수의 입력 vol_ratio 는 detector.details['vol_ratio'] 에서 가져온다. 모든 패턴이 동일 키 통일 (이전엔 3 패턴이 다른 키 사용해 거래량 점수 항상 0 → max 80점 버그):", italic=True)
     _add_table(
         doc,
         ["패턴", "vol_ratio 의미"],
         [
-            ["double_bottom",  "details 에 vol_ratio 키 없음 → scorer 가 0 으로 받아 거래량 점수 0 (raw_score 의 거래량 항목으로 대체 평가)"],
-            ["golden_cross",   "details.vol_ratio_at_cross — 돌파일 거래량 / 20일 평균"],
-            ["box_breakout",   "details.vol_ratio_at_break — 동일"],
-            ["pullback",       "details.vol_ratio — 당일 거래량 / 5일 평균"],
+            ["double_bottom",  "목선 돌파일 거래량 / 직전 20일 평균"],
+            ["golden_cross",   "골든크로스 발생일 거래량 / 직전 20일 평균 (= vol_ratio_at_cross alias)"],
+            ["box_breakout",   "박스 상단 돌파일 거래량 / 직전 20일 평균 (= vol_ratio_at_break alias)"],
+            ["pullback",       "당일 거래량 / 직전 5일 평균"],
         ],
         col_widths_cm=[4.0, 12.5],
     )
-    _add_para(doc, "70점 이상 종목만 최종 리포트에 포함한다 (CLI --min-confidence 로 조정).", italic=True)
+    _add_para(doc, "75점 이상 종목만 최종 리포트에 포함한다 (CLI --min-confidence 로 조정). 이전 70 → 75 상향 — vol_ratio 키 통일로 max 점수가 80→100 정상화되어 컷도 비례 조정.", italic=True)
 
     _add_heading(doc, "4.7 진입 신호 (4시간봉 기반)", 2)
     _add_para(doc, "각 detector 의 entry_signal() 메서드가 4가지 신호를 평가한다 (각 25점, 합계 0~100). 4시간봉이 진입 타이밍 프레임이며, MA20·박스 상단·20일 고점 같은 일봉 컨텍스트는 일봉 그대로 사용한다.")

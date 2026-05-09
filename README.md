@@ -102,7 +102,7 @@ scanner show 005930 --date 2026-05-04
 | --- | --- | --- |
 | `--market`, `-m` | `all` | 스캔 시장: `kr` \| `us` \| `all` |
 | `--pattern`, `-p` | _(없음)_ | 패턴 필터 (쉼표 구분, 예: `pullback,box_breakout`) |
-| `--min-confidence` | `70.0` | 상위 결과 표시 최소 신뢰도 (0~100) |
+| `--min-confidence` | `75.0` | 상위 결과 표시 최소 신뢰도 (0~100) |
 | `--no-volume-filter` | `False` | 거래량 필터 비활성화 |
 | `--with-fundamental-filter` | `False` | 재무 필터 활성화 |
 | `--skip-fetch` | `False` | 데이터 fetch 생략 (DB 기존 데이터로 스캔) |

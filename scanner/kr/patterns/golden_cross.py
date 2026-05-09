@@ -130,6 +130,8 @@ class GoldenCrossDetector(PatternDetector):
             "days_since_cross": len(close) - 1 - cross_idx,
             "ma60_slope_pct": round(slope_pct * 100, 4),
             "vol_ratio_at_cross": round(cross_vol_ratio, 4),
+            # scorer.py 가 details["vol_ratio"] 키를 찾는다 — 거래량 점수 (20% 가중치)
+            "vol_ratio": round(cross_vol_ratio, 4),
             "last_ma20": round(last_ma20, 4),
             "last_ma60": round(last_ma60, 4),
         }
