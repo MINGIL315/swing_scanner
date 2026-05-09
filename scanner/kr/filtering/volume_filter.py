@@ -1,12 +1,19 @@
-"""거래량/거래대금 유동성 필터 (CLAUDE.md §7)."""
+"""거래량 모멘텀 필터 (CLAUDE.md §7).
+
+조건: 최근 5일 거래량 평균 > 직전 20일 거래량 평균.
+(자금 유입/관심 증가 신호 — 차트 패턴 신호의 진정성 확인용)
+
+옛 일평균 거래대금 컷(KR 50억원, US 5천만 USD)은 폐기되었다 (KOSPI200
+우량주 단계에서 사실상 모든 종목이 통과해 의미 작음 — 2026-05-09).
+거래대금 데이터(``OHLCVDaily.value``) 자체는 계속 적재되며 KOSPI 외 일반/
+KOSDAQ 도입 시 재활성화 검토 가능.
+"""
 from __future__ import annotations
 
 import pandas as pd
 
 from scanner.config import (
     LIQUIDITY_LOOKBACK_DAYS,
-    MIN_AVG_TRADING_VALUE_KRW,
-    MIN_AVG_TRADING_VALUE_USD,
     RECENT_VOLUME_LOOKBACK_DAYS,
 )
 
@@ -15,75 +22,33 @@ def passes_volume_filter(
     daily_df: pd.DataFrame,
     market: str,
 ) -> tuple[bool, dict]:
-    """유동성 필터 통과 여부를 반환한다.
-
-    두 가지 조건을 모두 충족해야 True:
-    1. 직전 20일 일평균 거래대금 ≥ 임계값 (KR: 50억원, US: 5천만USD)
-    2. 최근 5일 거래량 평균 > 직전 20일 거래량 평균
-
-    거래대금(value) 컬럼이 없거나 NaN이면 Typical Price × volume 으로 대체한다.
+    """거래량 모멘텀 필터 통과 여부를 반환한다.
 
     Args:
-        daily_df: 일봉 OHLCV DataFrame. value 컬럼 선택적.
-        market  : "KR" 또는 "US".
+        daily_df: 일봉 OHLCV DataFrame. ``volume`` 컬럼 필수.
+        market  : "KR" 또는 "US" (현재 동일 동작 — 시그니처 호환성 유지).
 
     Returns:
         (passed, details) 튜플.
-        details 키: avg_value, threshold, ok_value, recent_vol, base_vol, ok_volume_trend.
+        details 키: recent_vol, base_vol, ok_volume_trend, passed.
     """
-    m = market.upper()
-    threshold = MIN_AVG_TRADING_VALUE_KRW if m == "KR" else MIN_AVG_TRADING_VALUE_USD
+    if "volume" not in daily_df.columns or len(daily_df) < RECENT_VOLUME_LOOKBACK_DAYS + 1:
+        return False, {
+            "recent_vol": 0.0,
+            "base_vol": 0.0,
+            "ok_volume_trend": False,
+            "passed": False,
+        }
 
-    # ── 거래대금 계산 ─────────────────────────────────────────────
-    value_series = _get_value_series(daily_df)
-    lookback = min(LIQUIDITY_LOOKBACK_DAYS, len(value_series))
-    avg_value = float(value_series.iloc[-lookback:].mean()) if lookback > 0 else 0.0
-    ok_value = avg_value >= threshold
+    vol = daily_df["volume"]
+    recent_vol = float(vol.iloc[-RECENT_VOLUME_LOOKBACK_DAYS:].mean())
+    base_lookback = min(LIQUIDITY_LOOKBACK_DAYS, len(vol))
+    base_vol = float(vol.iloc[-base_lookback:].mean())
+    ok_volume_trend = recent_vol > base_vol
 
-    # ── 거래량 모멘텀 계산 ────────────────────────────────────────
-    if "volume" in daily_df.columns and len(daily_df) >= RECENT_VOLUME_LOOKBACK_DAYS + 1:
-        vol = daily_df["volume"]
-        recent_vol = float(vol.iloc[-RECENT_VOLUME_LOOKBACK_DAYS:].mean())
-        base_lookback = min(LIQUIDITY_LOOKBACK_DAYS, len(vol))
-        base_vol = float(vol.iloc[-base_lookback:].mean())
-        ok_volume_trend = recent_vol > base_vol
-    else:
-        recent_vol = 0.0
-        base_vol = 0.0
-        ok_volume_trend = False
-
-    passed = ok_value and ok_volume_trend
-
-    details: dict = {
-        "avg_value": round(avg_value, 0),
-        "threshold": threshold,
-        "ok_value": ok_value,
+    return ok_volume_trend, {
         "recent_vol": round(recent_vol, 0),
         "base_vol": round(base_vol, 0),
         "ok_volume_trend": ok_volume_trend,
+        "passed": ok_volume_trend,
     }
-    return passed, details
-
-
-def _get_value_series(daily_df: pd.DataFrame) -> pd.Series:
-    """거래대금 시리즈를 반환한다.
-
-    value 컬럼이 있고 NaN이 아닌 행이 충분하면 그대로 사용.
-    그렇지 않으면 Typical Price × volume 으로 계산한다.
-    """
-    if "value" in daily_df.columns:
-        v = daily_df["value"].dropna()
-        if len(v) >= LIQUIDITY_LOOKBACK_DAYS // 2:
-            return daily_df["value"].fillna(0.0)
-
-    # Typical Price fallback
-    required = {"high", "low", "close", "volume"}
-    if required.issubset(daily_df.columns):
-        tp = (daily_df["high"] + daily_df["low"] + daily_df["close"]) / 3.0
-        return tp * daily_df["volume"]
-
-    # 마지막 수단: close × volume
-    if "close" in daily_df.columns and "volume" in daily_df.columns:
-        return daily_df["close"] * daily_df["volume"]
-
-    return pd.Series(dtype=float)
