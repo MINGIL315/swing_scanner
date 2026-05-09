@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>종목 상세 — Swing Scanner</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@5/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root { --accent:#3b82f6; }
     body { background:#0d1117; color:#e6edf3; font-family:'Segoe UI',system-ui,sans-serif; }
@@ -40,18 +40,10 @@
     <div id="trade-grid" class="grid grid-cols-3 md:grid-cols-6 gap-4 mt-4"></div>
   </section>
 
-  <!-- 차트 -->
-  <section class="card p-4">
-    <h2 class="text-sm font-semibold text-gray-400 mb-3">캔들 차트 + 이동평균</h2>
-    <div id="chart-candle" style="height:300px;"></div>
-  </section>
-  <section class="card p-4">
-    <h2 class="text-sm font-semibold text-gray-400 mb-3">거래량</h2>
-    <div id="chart-volume" style="height:120px;"></div>
-  </section>
-  <section class="card p-4">
-    <h2 class="text-sm font-semibold text-gray-400 mb-3">RSI (14)</h2>
-    <div id="chart-rsi" style="height:120px;"></div>
+  <!-- 통합 차트 — v5 panes (단일 chart 객체에 addSeries(type, opts, paneIndex)) -->
+  <section class="card p-2">
+    <div id="chart-info-bar" class="flex flex-wrap items-center gap-3 px-2 pt-1 pb-2 text-xs text-gray-400 border-b border-gray-700"></div>
+    <div id="chart-main" style="height:600px;"></div>
   </section>
 
   <!-- AI 코멘트 -->
@@ -99,18 +91,47 @@ function initFav() {
   }
 }
 
-// 차트 공통 옵션
-function chartOpts(height) {
+// 차트 공통 옵션 (한국 일봉 — 시간 표시 X, 가격축 너비 고정으로 시간축 정렬)
+const PRICE_SCALE_WIDTH = 80;
+
+// 시간축 라벨 포맷터 — 'YYYY-MM-DD' 형태로 통일
+function _formatTime(time) {
+  if (typeof time === 'object' && time && time.year) {
+    return `${time.year}-${String(time.month).padStart(2,'0')}-${String(time.day).padStart(2,'0')}`;
+  }
+  if (typeof time === 'string') return time.slice(0, 10);
+  if (typeof time === 'number') return new Date(time * 1000).toISOString().slice(0, 10);
+  return '';
+}
+
+function chartOpts(height, showTimeAxis) {
   return {
     width: 0,
     height,
     layout: { background:{ color:'#161b22' }, textColor:'#8b949e' },
     grid: { vertLines:{ color:'#21262d' }, horzLines:{ color:'#21262d' } },
-    crosshair: { mode: 1 },
-    rightPriceScale: { borderColor:'#30363d' },
-    timeScale: { borderColor:'#30363d', timeVisible:true },
+    crosshair: { mode: 0 },  // 0 = Magnet (가까운 캔들에 스냅), 1 = Normal
+    rightPriceScale: {
+      borderColor:'#30363d',
+      minimumWidth: PRICE_SCALE_WIDTH,
+    },
+    timeScale: {
+      borderColor:'#30363d',
+      timeVisible: false,
+      secondsVisible: false,
+      visible: !!showTimeAxis,  // 마지막 차트(rsi)만 라벨 표시
+      tickMarkFormatter: _formatTime,
+    },
+    localization: {
+      locale: 'ko-KR',
+      dateFormat: 'yyyy-MM-dd',
+      timeFormatter: _formatTime,
+    },
   };
 }
+
+// KR 종목 가격 포맷 (정수 원 + 천 단위 콤마는 LightweightCharts 가 기본)
+const PRICE_FORMAT_KR = { type: 'price', precision: 0, minMove: 1 };
 
 async function loadAnalysis() {
   const r = await fetch(`${API}/api/stocks/${ticker}/analysis`);
@@ -146,6 +167,14 @@ async function loadAnalysis() {
     <div><p class="text-xs text-gray-400">${k}</p><p class="font-semibold mt-0.5">${v}</p></div>`
   ).join('');
 
+  // 진입/손절/목표 가격 라인 차트에 적용
+  setPriceLines({
+    entry:  first.entry_price,
+    stop:   first.stop_loss,
+    target: first.target_price,
+  });
+  if (window._chartApplyPriceLines) window._chartApplyPriceLines();
+
   // AI 코멘트
   const cmtEl = document.getElementById('ai-comment');
   first.ai_comment.forEach((phase, i) => {
@@ -158,50 +187,134 @@ async function loadAnalysis() {
   });
 }
 
+// 진입/손절/목표 가격 라인 — analysis API 결과를 차트에 그리기 위해 보관
+let _priceLineParams = null;
+function setPriceLines(params) { _priceLineParams = params; }
+
 async function loadChart() {
   const r = await fetch(`${API}/api/stocks/${ticker}/ohlcv?days=120`);
   if (!r.ok) return;
   const d = await r.json();
 
-  // 캔들 차트
-  const candleEl = document.getElementById('chart-candle');
-  candleEl.style.width = '100%';
-  const cChart = LightweightCharts.createChart(candleEl, { ...chartOpts(300), width: candleEl.offsetWidth });
-  const candleSeries = cChart.addCandlestickSeries({
+  const el = document.getElementById('chart-main');
+
+  // v5: 단일 차트 + panes (addSeries 의 paneIndex 인자로 분리)
+  const chart = LightweightCharts.createChart(el, {
+    width: el.offsetWidth,
+    height: 600,
+    layout: {
+      background:{ color:'#161b22' },
+      textColor:'#8b949e',
+      panes: {
+        separatorColor: '#30363d',
+        separatorHoverColor: 'rgba(88, 166, 255, 0.2)',
+        enableResize: true,
+      },
+    },
+    grid: { vertLines:{ color:'#21262d' }, horzLines:{ color:'#21262d' } },
+    crosshair: { mode: 0 },
+    rightPriceScale: { borderColor:'#30363d' },
+    timeScale: {
+      borderColor:'#30363d',
+      timeVisible: false,
+      secondsVisible: false,
+      tickMarkFormatter: _formatTime,
+    },
+    localization: {
+      locale: 'ko-KR',
+      dateFormat: 'yyyy-MM-dd',
+      timeFormatter: _formatTime,
+    },
+  });
+
+  // ── pane 0: 캔들 + MA ─────────────────────────────────────────
+  const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
     upColor:'#3fb950', downColor:'#f85149',
     borderUpColor:'#3fb950', borderDownColor:'#f85149',
     wickUpColor:'#3fb950', wickDownColor:'#f85149',
+    priceFormat: PRICE_FORMAT_KR,
   });
-  candleSeries.setData(d.candles);
+  candleSeries.setData(d.candles || []);
 
-  if (d.ma5?.length)  cChart.addLineSeries({ color:'#f0c040', lineWidth:1, priceLineVisible:false }).setData(d.ma5);
-  if (d.ma20?.length) cChart.addLineSeries({ color:'#58a6ff', lineWidth:1, priceLineVisible:false }).setData(d.ma20);
-  if (d.ma60?.length) cChart.addLineSeries({ color:'#ff7b72', lineWidth:1, priceLineVisible:false }).setData(d.ma60);
+  if (d.ma5?.length)  chart.addSeries(LightweightCharts.LineSeries, { color:'#f0c040', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma5);
+  if (d.ma20?.length) chart.addSeries(LightweightCharts.LineSeries, { color:'#58a6ff', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma20);
+  if (d.ma60?.length) chart.addSeries(LightweightCharts.LineSeries, { color:'#ff7b72', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma60);
 
-  // 거래량 차트
-  const volEl = document.getElementById('chart-volume');
-  const vChart = LightweightCharts.createChart(volEl, { ...chartOpts(120), width: volEl.offsetWidth });
-  const volSeries = vChart.addHistogramSeries({ priceFormat:{ type:'volume' }, priceScaleId:'' });
-  volSeries.setData(d.volume);
+  // ── pane 1: 거래량 ─────────────────────────────────────────────
+  const volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+    priceFormat: { type: 'volume' },
+  }, 1);  // ← paneIndex
+  volSeries.setData(d.volume || []);
 
-  // RSI 차트
-  const rsiEl = document.getElementById('chart-rsi');
-  const rChart = LightweightCharts.createChart(rsiEl, { ...chartOpts(120), width: rsiEl.offsetWidth });
-  const rsiSeries = rChart.addLineSeries({ color:'#a78bfa', lineWidth:1 });
-  if (d.rsi?.length) rsiSeries.setData(d.rsi);
+  // ── pane 2: RSI (0~100 강제) ───────────────────────────────────
+  if (d.rsi?.length) {
+    const rsiSeries = chart.addSeries(LightweightCharts.LineSeries, {
+      color:'#a78bfa', lineWidth:1, priceLineVisible:false,
+      priceFormat: { type: 'price', precision: 0, minMove: 1 },
+    }, 2);  // ← paneIndex
+    rsiSeries.setData(d.rsi);
 
-  // 동기화
-  [cChart, vChart, rChart].forEach(src => {
-    src.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      if (!range) return;
-      [cChart, vChart, rChart].filter(c => c !== src).forEach(c => c.timeScale().setVisibleLogicalRange(range));
-    });
-  });
+    rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
+    rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
 
+    // 0~100 boundary (invisible) — pane 2 에 같이
+    const boundsSeries = chart.addSeries(LightweightCharts.LineSeries, {
+      color: 'rgba(0,0,0,0)',
+      lineWidth: 0,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    }, 2);
+    boundsSeries.setData([
+      { time: d.rsi[0].time, value: 0 },
+      { time: d.rsi[d.rsi.length - 1].time, value: 100 },
+    ]);
+  }
+
+  // ── pane 높이 (캔들 360 / 거래량 100 / RSI 120 = 총 580 + 분리선) ──
+  try {
+    const panes = chart.panes();
+    if (panes && panes.length >= 1) {
+      if (panes[0] && panes[0].setHeight) panes[0].setHeight(360);
+      if (panes[1] && panes[1].setHeight) panes[1].setHeight(100);
+      if (panes[2] && panes[2].setHeight) panes[2].setHeight(120);
+    }
+  } catch (e) {
+    console.warn('panes setHeight failed:', e);
+  }
+
+  // ── 진입/손절/목표 가격 라인 ────────────────────────────────────
+  function applyPriceLines() {
+    if (!_priceLineParams) return;
+    const { entry, stop, target } = _priceLineParams;
+    if (entry  != null) candleSeries.createPriceLine({ price: entry,  color:'#58a6ff', lineWidth:1, lineStyle:0, axisLabelVisible:true, title:'진입' });
+    if (stop   != null) candleSeries.createPriceLine({ price: stop,   color:'#f85149', lineWidth:1, lineStyle:0, axisLabelVisible:true, title:'손절' });
+    if (target != null) candleSeries.createPriceLine({ price: target, color:'#3fb950', lineWidth:1, lineStyle:0, axisLabelVisible:true, title:'목표' });
+  }
+  applyPriceLines();
+  window._chartApplyPriceLines = applyPriceLines;
+
+  // ── 차트 상단 정보 바 ──────────────────────────────────────────
+  const lastCandle = (d.candles && d.candles[d.candles.length - 1]) || null;
+  const lastRsi    = (d.rsi && d.rsi[d.rsi.length - 1]) || null;
+  if (lastCandle) {
+    const fmt = (n) => Number(n).toLocaleString('ko-KR');
+    document.getElementById('chart-info-bar').innerHTML = `
+      <span class="font-semibold text-gray-200">${lastCandle.time}</span>
+      <span>O <span class="text-gray-200">${fmt(lastCandle.open)}</span></span>
+      <span>H <span class="text-gray-200">${fmt(lastCandle.high)}</span></span>
+      <span>L <span class="text-gray-200">${fmt(lastCandle.low)}</span></span>
+      <span>C <span class="text-gray-200">${fmt(lastCandle.close)}</span></span>
+      <span class="ml-3" style="color:#f0c040">● MA5</span>
+      <span style="color:#58a6ff">● MA20</span>
+      <span style="color:#ff7b72">● MA60</span>
+      ${lastRsi != null ? `<span class="ml-3" style="color:#a78bfa">RSI(14) ${lastRsi.value.toFixed(1)}</span>` : ''}
+    `;
+  }
+
+  chart.timeScale().fitContent();
   window.addEventListener('resize', () => {
-    cChart.resize(candleEl.offsetWidth, 300);
-    vChart.resize(volEl.offsetWidth, 120);
-    rChart.resize(rsiEl.offsetWidth, 120);
+    chart.resize(el.offsetWidth, 600);
   });
 }
 
