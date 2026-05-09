@@ -5,10 +5,32 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from scanner.db.models import Universe
 from scanner.db.session import get_session
 
 router = APIRouter(tags=["stocks"])
+
+
+def _resolve_market(ticker: str, session: Session) -> str:
+    """Universe 테이블에서 ticker 의 market 을 반환한다.
+
+    ticker.isdigit() 같은 패턴 추측 대신 DB 를 진실의 원천으로 사용 — KOSPI200
+    의 영숫자 6자리 ticker (예: '0126Z0' 삼성에피스홀딩스) 도 정확히 KR 로 분기.
+
+    Args:
+        ticker : 대문자 정규화된 종목 코드.
+        session: 활성 SQLAlchemy 세션.
+
+    Returns:
+        ``"KR"`` / ``"US"`` / 미등록 종목은 ``"US"`` fallback.
+    """
+    market = session.execute(
+        select(Universe.market).where(Universe.ticker == ticker)
+    ).scalar_one_or_none()
+    return market or "US"
 
 
 @router.get("/stocks/{ticker}/ohlcv")
@@ -17,20 +39,14 @@ def stock_ohlcv(
     days: int = Query(default=1000, ge=10, le=2000, description="최근 N영업일치 (default=1000 ≈ 약 4년)"),
 ) -> dict[str, Any]:
     """일봉 OHLCV + 이동평균 + RSI 를 반환한다."""
-    from sqlalchemy import select
-
     from scanner.db.models import OHLCVDaily
     import json
     import pandas as pd
 
     ticker = ticker.upper()
-    # ticker 패턴으로 시장 추론 (한국=6자리 숫자, 미국=알파벳)
-    if ticker.isdigit():
-        from scanner.kr.reports.html_report import _build_ohlcv_json
-    else:
-        from scanner.us.reports.html_report import _build_ohlcv_json
 
     with get_session() as session:
+        market = _resolve_market(ticker, session)
         rows = list(
             session.execute(
                 select(OHLCVDaily)
@@ -39,6 +55,11 @@ def stock_ohlcv(
                 .limit(days)
             ).scalars().all()
         )
+
+    if market == "KR":
+        from scanner.kr.reports.html_report import _build_ohlcv_json
+    else:
+        from scanner.us.reports.html_report import _build_ohlcv_json
 
     if not rows:
         raise HTTPException(status_code=404, detail=f"{ticker} OHLCV 데이터 없음")
@@ -68,21 +89,15 @@ def stock_analysis(
     scan_date: date = Query(default=None, description="조회 날짜 (기본: 오늘)"),
 ) -> list[dict[str, Any]]:
     """특정 종목의 스캔 결과 + AI 코멘트를 반환한다."""
-    from sqlalchemy import select
-
-    from scanner.db.models import ScanResult, Universe
+    from scanner.db.models import ScanResult
 
     if scan_date is None:
         scan_date = date.today()
 
     ticker = ticker.upper()
-    # ticker 패턴으로 시장 추론
-    if ticker.isdigit():
-        from scanner.kr.reports.comment_generator import generate_comment
-    else:
-        from scanner.us.reports.comment_generator import generate_comment
 
     with get_session() as session:
+        market = _resolve_market(ticker, session)
         rows = list(
             session.execute(
                 select(ScanResult)
@@ -97,6 +112,11 @@ def stock_analysis(
             select(Universe.name).where(Universe.ticker == ticker)
         ).scalar_one_or_none()
         name = name_row or ""
+
+    if market == "KR":
+        from scanner.kr.reports.comment_generator import generate_comment
+    else:
+        from scanner.us.reports.comment_generator import generate_comment
 
     if not rows:
         raise HTTPException(
