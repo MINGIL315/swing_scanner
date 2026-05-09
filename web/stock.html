@@ -50,6 +50,7 @@
       <div class="flex gap-1">
         <button id="tf-daily"  class="tf-btn active" onclick="setTimeFrame('daily')">일</button>
         <button id="tf-weekly" class="tf-btn"        onclick="setTimeFrame('weekly')">주</button>
+        <button id="tf-4h"     class="tf-btn"        onclick="setTimeFrame('4h')" title="60분봉 → 4시간봉 (KR 분봉 적재 시만)">4H</button>
       </div>
       <div id="chart-info-bar" class="flex flex-wrap items-center gap-3 text-xs text-gray-400"></div>
     </div>
@@ -165,17 +166,53 @@ async function loadAnalysis() {
 
   const grid = document.getElementById('trade-grid');
   const f = first;
+
+  // 진입 강도 색상 (0~100)
+  const entryColor = (s) => {
+    if (s == null) return 'text-gray-500';
+    return s >= 75 ? 'text-green-400' : s >= 50 ? 'text-yellow-400' : 'text-red-400';
+  };
+  const entryStr = f.entry_signal_strength != null
+    ? `<span class="${entryColor(f.entry_signal_strength)}">${f.entry_signal_strength.toFixed(0)}점</span>`
+    : '<span class="text-gray-500">-</span>';
+
   const fields = [
     ['진입가', f.entry_price?.toLocaleString() || '-'],
     ['손절가', f.stop_loss?.toLocaleString() || '-'],
     ['목표가', f.target_price?.toLocaleString() || '-'],
     ['손익비', f.risk_reward_ratio ? '1:'+f.risk_reward_ratio.toFixed(1) : '-'],
     ['신뢰도', f.confidence_score.toFixed(1)+'점'],
+    ['진입 강도', entryStr],
     ['필터', f.passed_filters ? '✅ 통과' : '❌ 미통과'],
   ];
   grid.innerHTML = fields.map(([k,v]) => `
     <div><p class="text-xs text-gray-400">${k}</p><p class="font-semibold mt-0.5">${v}</p></div>`
   ).join('');
+
+  // 진입 신호 컴포넌트 (entry_signals dict[str, bool])
+  if (f.entry_signals && typeof f.entry_signals === 'object') {
+    const SIGNAL_LABELS = {
+      rsi_rising: 'RSI 상승',
+      bullish_volume: '거래량 양봉',
+      bullish_candle: '양봉 캔들',
+      macd_positive: 'MACD 양전환',
+      above_ma20: 'MA20 위',
+      above_ma60: 'MA60 위',
+      neckline_break: '목선 돌파',
+      box_break: '박스 돌파',
+      volume_surge: '거래량 급증',
+      pullback_reversal: '눌림목 반등',
+    };
+    const chips = Object.entries(f.entry_signals).map(([k, v]) => {
+      const label = SIGNAL_LABELS[k] || k;
+      const cls = v ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500';
+      const icon = v ? '✓' : '✗';
+      return `<span class="px-2 py-0.5 rounded text-xs ${cls}">${icon} ${label}</span>`;
+    }).join('');
+    if (chips) {
+      grid.innerHTML += `<div class="col-span-full mt-2"><p class="text-xs text-gray-400 mb-1.5">진입 신호 컴포넌트 (60분봉 기반)</p><div class="flex flex-wrap gap-1.5">${chips}</div></div>`;
+    }
+  }
 
   // 진입/손절/목표 가격 라인 차트에 적용
   setPriceLines({
@@ -213,6 +250,23 @@ function setTimeFrame(tf) {
   // 버튼 active 표시
   document.getElementById('tf-daily').classList.toggle('active', tf === 'daily');
   document.getElementById('tf-weekly').classList.toggle('active', tf === 'weekly');
+  document.getElementById('tf-4h').classList.toggle('active', tf === '4h');
+}
+
+// 4시간봉 데이터 유무에 따라 [4H] 버튼 활성/비활성
+function _updateTfButtonsAvailability() {
+  const btn4h = document.getElementById('tf-4h');
+  if (!btn4h || !_ohlcvPayload) return;
+  const has4h = _ohlcvPayload['4h'] && _ohlcvPayload['4h'].candles?.length > 0;
+  if (!has4h) {
+    btn4h.style.opacity = '0.4';
+    btn4h.style.cursor = 'not-allowed';
+    btn4h.title = '4시간봉 데이터 없음 (KR 분봉 미적재)';
+  } else {
+    btn4h.style.opacity = '';
+    btn4h.style.cursor = 'pointer';
+    btn4h.title = '60분봉 → 4시간봉 (drop_partial=False)';
+  }
 }
 
 function _applyTimeFrame(tf) {
@@ -256,10 +310,11 @@ async function loadChart() {
   // 3년치(≈750영업일) 가 DB 에 적재됨 → 적재된 만큼 모두 차트에 표시 (1000 = 충분한 buffer)
   const r = await fetch(`${API}/api/stocks/${ticker}/ohlcv?days=1000`);
   if (!r.ok) return;
-  // 응답 형태: {daily: {candles, ma5, ma20, ma60, volume, rsi}, weekly: {...}}
+  // 응답 형태: {daily: {...}, weekly: {...}, "4h": {...} (KR 분봉 적재 시만)}
   _ohlcvPayload = await r.json();
   const d = _ohlcvPayload[_currentTF] || _ohlcvPayload.daily;
   if (!d) return;
+  _updateTfButtonsAvailability();
 
   const el = document.getElementById('chart-main');
 
