@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>종목 상세 — Swing Scanner</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@5/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root { --accent:#3b82f6; }
     body { background:#0d1117; color:#e6edf3; font-family:'Segoe UI',system-ui,sans-serif; }
@@ -40,12 +40,10 @@
     <div id="trade-grid" class="grid grid-cols-3 md:grid-cols-6 gap-4 mt-4"></div>
   </section>
 
-  <!-- 통합 차트 — 분리 차트 3개 + 시간축 동기화 + 크로스헤어 동기화 (fallback 안정 상태) -->
+  <!-- 통합 차트 — v5 panes (단일 chart 객체에 addSeries(type, opts, paneIndex)) -->
   <section class="card p-2">
     <div id="chart-info-bar" class="flex flex-wrap items-center gap-3 px-2 pt-1 pb-2 text-xs text-gray-400 border-b border-gray-700"></div>
-    <div id="chart-candle" style="height:380px;"></div>
-    <div id="chart-volume" style="height:100px;"></div>
-    <div id="chart-rsi"    style="height:120px;"></div>
+    <div id="chart-main" style="height:600px;"></div>
   </section>
 
   <!-- AI 코멘트 -->
@@ -198,15 +196,39 @@ async function loadChart() {
   if (!r.ok) return;
   const d = await r.json();
 
-  const candleEl = document.getElementById('chart-candle');
-  const volEl    = document.getElementById('chart-volume');
-  const rsiEl    = document.getElementById('chart-rsi');
+  const el = document.getElementById('chart-main');
 
-  // ── 캔들 + MA 차트 (시간축 라벨 숨김) ───────────────────────────
-  const cChart = LightweightCharts.createChart(candleEl, {
-    ...chartOpts(380, false), width: candleEl.offsetWidth,
+  // v5: 단일 차트 + panes (addSeries 의 paneIndex 인자로 분리)
+  const chart = LightweightCharts.createChart(el, {
+    width: el.offsetWidth,
+    height: 600,
+    layout: {
+      background:{ color:'#161b22' },
+      textColor:'#8b949e',
+      panes: {
+        separatorColor: '#30363d',
+        separatorHoverColor: 'rgba(88, 166, 255, 0.2)',
+        enableResize: true,
+      },
+    },
+    grid: { vertLines:{ color:'#21262d' }, horzLines:{ color:'#21262d' } },
+    crosshair: { mode: 0 },
+    rightPriceScale: { borderColor:'#30363d' },
+    timeScale: {
+      borderColor:'#30363d',
+      timeVisible: false,
+      secondsVisible: false,
+      tickMarkFormatter: _formatTime,
+    },
+    localization: {
+      locale: 'ko-KR',
+      dateFormat: 'yyyy-MM-dd',
+      timeFormatter: _formatTime,
+    },
   });
-  const candleSeries = cChart.addCandlestickSeries({
+
+  // ── pane 0: 캔들 + MA ─────────────────────────────────────────
+  const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
     upColor:'#3fb950', downColor:'#f85149',
     borderUpColor:'#3fb950', borderDownColor:'#f85149',
     wickUpColor:'#3fb950', wickDownColor:'#f85149',
@@ -214,90 +236,52 @@ async function loadChart() {
   });
   candleSeries.setData(d.candles || []);
 
-  if (d.ma5?.length)  cChart.addLineSeries({ color:'#f0c040', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma5);
-  if (d.ma20?.length) cChart.addLineSeries({ color:'#58a6ff', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma20);
-  if (d.ma60?.length) cChart.addLineSeries({ color:'#ff7b72', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma60);
+  if (d.ma5?.length)  chart.addSeries(LightweightCharts.LineSeries, { color:'#f0c040', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma5);
+  if (d.ma20?.length) chart.addSeries(LightweightCharts.LineSeries, { color:'#58a6ff', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma20);
+  if (d.ma60?.length) chart.addSeries(LightweightCharts.LineSeries, { color:'#ff7b72', lineWidth:1, priceLineVisible:false, priceFormat: PRICE_FORMAT_KR }).setData(d.ma60);
 
-  // ── 거래량 차트 (시간축 라벨 숨김) ──────────────────────────────
-  const vChart = LightweightCharts.createChart(volEl, {
-    ...chartOpts(100, false), width: volEl.offsetWidth,
-  });
-  const volSeries = vChart.addHistogramSeries({
+  // ── pane 1: 거래량 ─────────────────────────────────────────────
+  const volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
-    priceScaleId: '',
-    scaleMargins: { top: 0.1, bottom: 0 },
-  });
+  }, 1);  // ← paneIndex
   volSeries.setData(d.volume || []);
 
-  // ── RSI 차트 (시간축 라벨 표시) ─────────────────────────────────
-  const rChart = LightweightCharts.createChart(rsiEl, {
-    ...chartOpts(120, true), width: rsiEl.offsetWidth,
-  });
-  let rsiSeries = null;
+  // ── pane 2: RSI (0~100 강제) ───────────────────────────────────
   if (d.rsi?.length) {
-    rsiSeries = rChart.addLineSeries({
+    const rsiSeries = chart.addSeries(LightweightCharts.LineSeries, {
       color:'#a78bfa', lineWidth:1, priceLineVisible:false,
       priceFormat: { type: 'price', precision: 0, minMove: 1 },
-    });
+    }, 2);  // ← paneIndex
     rsiSeries.setData(d.rsi);
+
     rsiSeries.createPriceLine({ price: 70, color: '#f85149', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
     rsiSeries.createPriceLine({ price: 30, color: '#3fb950', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '' });
 
-    // RSI Y축을 0~100 으로 강제하기 위한 invisible bounds series
-    const boundsSeries = rChart.addLineSeries({
+    // 0~100 boundary (invisible) — pane 2 에 같이
+    const boundsSeries = chart.addSeries(LightweightCharts.LineSeries, {
       color: 'rgba(0,0,0,0)',
       lineWidth: 0,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
-    });
+    }, 2);
     boundsSeries.setData([
       { time: d.rsi[0].time, value: 0 },
       { time: d.rsi[d.rsi.length - 1].time, value: 100 },
     ]);
-
-    // 음수 영역 안 보이게 scaleMargins 최소화
-    rChart.priceScale('right').applyOptions({
-      scaleMargins: { top: 0.05, bottom: 0.05 },
-    });
   }
 
-  // priceScale 폭 통일 시도 (v4.1.3 에서 작동 미보장 — 분리 차트의 한계)
-  cChart.priceScale('right').applyOptions({ minimumWidth: PRICE_SCALE_WIDTH });
-  vChart.priceScale('right').applyOptions({ minimumWidth: PRICE_SCALE_WIDTH });
-  rChart.priceScale('right').applyOptions({ minimumWidth: PRICE_SCALE_WIDTH });
-
-  // ── 시간축 동기화 (스크롤/줌) ───────────────────────────────────
-  const charts = [cChart, vChart, rChart];
-  charts.forEach(src => {
-    src.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      if (!range) return;
-      charts.filter(c => c !== src).forEach(c => c.timeScale().setVisibleLogicalRange(range));
-    });
-  });
-
-  // ── 크로스헤어 동기화 ──────────────────────────────────────────
-  const seriesByChart = [
-    { chart: cChart, series: candleSeries },
-    { chart: vChart, series: volSeries },
-    { chart: rChart, series: rsiSeries },
-  ];
-  seriesByChart.forEach(({ chart: src }) => {
-    src.subscribeCrosshairMove((param) => {
-      if (!param.time) {
-        seriesByChart.forEach(({ chart, series }) => {
-          if (chart !== src && series) chart.clearCrosshairPosition();
-        });
-        return;
-      }
-      seriesByChart.forEach(({ chart, series }) => {
-        if (chart === src || !series) return;
-        const dataPoint = param.seriesData.get(seriesByChart.find(s => s.chart === src).series);
-        const refPrice = dataPoint?.value ?? dataPoint?.close ?? 0;
-        chart.setCrosshairPosition(refPrice, param.time, series);
-      });
-    });
-  });
+  // ── pane 높이 (캔들 360 / 거래량 100 / RSI 120 = 총 580 + 분리선) ──
+  try {
+    const panes = chart.panes();
+    if (panes && panes.length >= 1) {
+      if (panes[0] && panes[0].setHeight) panes[0].setHeight(360);
+      if (panes[1] && panes[1].setHeight) panes[1].setHeight(100);
+      if (panes[2] && panes[2].setHeight) panes[2].setHeight(120);
+    }
+  } catch (e) {
+    console.warn('panes setHeight failed:', e);
+  }
 
   // ── 진입/손절/목표 가격 라인 ────────────────────────────────────
   function applyPriceLines() {
@@ -328,11 +312,9 @@ async function loadChart() {
     `;
   }
 
-  cChart.timeScale().fitContent();
+  chart.timeScale().fitContent();
   window.addEventListener('resize', () => {
-    cChart.resize(candleEl.offsetWidth, 380);
-    vChart.resize(volEl.offsetWidth, 100);
-    rChart.resize(rsiEl.offsetWidth, 120);
+    chart.resize(el.offsetWidth, 600);
   });
 }
 
