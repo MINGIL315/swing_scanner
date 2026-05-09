@@ -14,7 +14,7 @@ router = APIRouter(tags=["stocks"])
 @router.get("/stocks/{ticker}/ohlcv")
 def stock_ohlcv(
     ticker: str,
-    days: int = Query(default=120, ge=10, le=500, description="최근 N일치"),
+    days: int = Query(default=1000, ge=10, le=2000, description="최근 N영업일치 (default=1000 ≈ 약 4년)"),
 ) -> dict[str, Any]:
     """일봉 OHLCV + 이동평균 + RSI 를 반환한다."""
     from sqlalchemy import select
