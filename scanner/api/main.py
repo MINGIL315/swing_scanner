@@ -35,11 +35,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 정적 파일 (web/ 폴더)
-_web_dir = settings.BASE_DIR / "web"
-if _web_dir.exists():
-    app.mount("/web", StaticFiles(directory=str(_web_dir)), name="web")
-
 # 라우터 등록
 app.include_router(scan_results.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
@@ -52,3 +47,11 @@ app.include_router(backtest.router, prefix="/api")
 def health() -> dict:
     """서버 상태 확인."""
     return {"status": "ok", "version": "1.0.0"}
+
+
+# 정적 파일 (web/ 폴더) — 루트 마운트.
+# 라우터(/api/...) 보다 뒤에 등록해야 /api/* 가 라우터로 우선 매칭됨.
+# html=True : "/" 요청 시 index.html 자동 서빙.
+_web_dir = settings.BASE_DIR / "web"
+if _web_dir.exists():
+    app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="web")
