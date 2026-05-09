@@ -366,3 +366,97 @@ def fetch_financial_ratio(ticker: str, annual: bool = True) -> pd.DataFrame:
             }
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# 일별 분봉 (TR FHKST03010230) — 1분봉, 한 호출 최대 120건
+# ---------------------------------------------------------------------------
+
+_MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice"
+_MINUTE_CHART_TR = "FHKST03010230"
+
+
+def fetch_minute_chart_chunk(
+    ticker: str,
+    target_date: date,
+    hour_end: str = "153000",
+    include_premarket: bool = False,
+) -> pd.DataFrame:
+    """KIS 일별 분봉 한 번 호출 — 최대 120개 1분봉.
+
+    명세서: 주식일별분봉조회 [국내주식-213], TR ``FHKST03010230``.
+    ``hour_end`` 시점 *이전* 의 1분봉 120개를 시간 역순으로 받아,
+    시간 정순으로 정렬해 반환한다.
+
+    KIS 는 1분봉만 제공하므로 60분/4시간봉 등은 호출처에서 ``pandas.resample``
+    로 합성해야 한다. 한 호출당 약 2시간치 1분봉 → 1일치(6.5시간) 풀 fetch 는
+    4번 호출 필요. KIS 보관 기간은 최대 1년치.
+
+    **실전 전용** — 모의투자 미지원.
+
+    Args:
+        ticker            : 6자리 종목코드.
+        target_date       : 조회 날짜.
+        hour_end          : ``"HHMMSS"`` 6자리 숫자. 이 시점 이전 1분봉 120개.
+                            기본 ``"153000"`` (장 마감 15:30:00).
+        include_premarket : 시간외(장전/장후) 데이터 포함 여부.
+
+    Returns:
+        columns = [ticker, datetime, open, high, low, close, volume]
+        ``datetime`` 은 ``pandas.Timestamp`` (ns 정밀도). 시간 정순.
+        빈 결과 시 빈 DataFrame.
+
+    Raises:
+        ValueError       : ``hour_end`` 형식 불량.
+        httpx.HTTPError  : 네트워크/HTTP 에러.
+        RuntimeError     : KIS rt_cd != "0".
+    """
+    if not (len(hour_end) == 6 and hour_end.isdigit()):
+        raise ValueError(f"hour_end 는 'HHMMSS' 6자리 숫자여야 합니다: {hour_end!r}")
+
+    data = _request(
+        "GET",
+        _MINUTE_CHART_PATH,
+        tr_id=_MINUTE_CHART_TR,
+        params={
+            "FID_COND_MRKT_DIV_CODE": "J",          # KRX
+            "FID_INPUT_ISCD": ticker,
+            "FID_INPUT_HOUR_1": hour_end,
+            "FID_INPUT_DATE_1": target_date.strftime("%Y%m%d"),
+            "FID_PW_DATA_INCU_YN": "Y" if include_premarket else "N",
+            "FID_FAKE_TICK_INCU_YN": "",            # 명세: 공백 필수
+        },
+    )
+
+    output2: list[dict[str, Any]] = data.get("output2", []) or []
+    rows: list[dict[str, Any]] = []
+    for item in output2:
+        bsop_date = item.get("stck_bsop_date")
+        cntg_hour = item.get("stck_cntg_hour")
+        if not bsop_date or not cntg_hour:
+            continue
+        try:
+            ts = datetime.strptime(f"{bsop_date}{cntg_hour}", "%Y%m%d%H%M%S")
+        except ValueError:
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "datetime": ts,
+                "open": _safe_float(item.get("stck_oprc")),
+                "high": _safe_float(item.get("stck_hgpr")),
+                "low": _safe_float(item.get("stck_lwpr")),
+                "close": _safe_float(item.get("stck_prpr")),
+                "volume": _safe_float(item.get("cntg_vol")),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    # KIS 응답이 시간 역순(최신→과거) → 정순으로 정렬
+    return (
+        pd.DataFrame(rows)
+        .sort_values("datetime")
+        .reset_index(drop=True)
+    )
