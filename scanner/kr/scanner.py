@@ -17,7 +17,7 @@ from scanner.config import FETCH_MAX_WORKERS
 from scanner.kr.filtering.fundamental_filter import passes_fundamental_filter
 from scanner.kr.filtering.volume_filter import passes_volume_filter
 from scanner.kr.patterns import ALL_DETECTORS
-from scanner.kr.patterns.base import PatternResult
+from scanner.kr.patterns.base import EntrySignal, PatternResult
 from scanner.kr.patterns.trend import detect_weekly_trend
 from scanner.kr.scoring.scorer import ScoringInput, calculate_confidence_score
 
@@ -43,6 +43,7 @@ class TickerScanResult:
     scan_date: date
     pattern_results: list[PatternResult] = field(default_factory=list)
     confidence_scores: list[float] = field(default_factory=list)
+    entry_signals: list[EntrySignal] = field(default_factory=list)  # pattern_results 와 1:1
     passed_volume: bool = False
     passed_fundamental: bool = False
     volume_details: dict[str, Any] = field(default_factory=dict)
@@ -55,18 +56,21 @@ def analyze_ticker(
     market: str,
     daily_df: pd.DataFrame,
     fundamentals: dict[str, float | None] | None = None,
+    intraday_df: pd.DataFrame | None = None,
 ) -> TickerScanResult:
-    """단일 종목에 대해 패턴 탐지 → 점수 계산 → 필터 적용을 수행한다.
+    """단일 종목에 대해 패턴 탐지 → 점수 계산 → 진입 신호 → 필터 적용.
 
     Args:
         ticker      : 종목 코드.
         market      : "KR" 또는 "US".
         daily_df    : 일봉 OHLCV DataFrame (최신 행이 마지막).
-        fundamentals: {'market_cap'} 딕셔너리.
-                      None 이면 재무 필터를 건너뛴다 (passed_fundamental=False).
+        fundamentals: {'market_cap'} 딕셔너리. None 이면 재무 필터 건너뜀.
+        intraday_df : 60분봉 DataFrame (4시간봉 합성 원천). None 이면 각 패턴의
+                      entry_signal 이 일봉으로 대리 평가 (CLAUDE.md §1 의 진입
+                      타이밍 프레임은 4시간봉이지만, 60분봉을 받아 패턴별로 활용).
 
     Returns:
-        TickerScanResult 인스턴스.
+        TickerScanResult 인스턴스. entry_signals 는 pattern_results 와 1:1 매핑.
     """
     scan_date = date.today()
     result = TickerScanResult(ticker=ticker, market=market, scan_date=scan_date)
@@ -79,7 +83,7 @@ def analyze_ticker(
     weekly_direction, weekly_strength = _get_weekly_trend(daily_df)
     result.weekly_direction = weekly_direction
 
-    # ── 패턴 탐지 + 점수 계산 ────────────────────────────────────
+    # ── 패턴 탐지 + 점수 + 진입 신호 ─────────────────────────────
     for detector in ALL_DETECTORS:
         try:
             pattern_result = detector.detect(daily_df, ticker)
@@ -97,8 +101,17 @@ def analyze_ticker(
             daily_df=daily_df,
         )
         score = calculate_confidence_score(inp)
+
+        # 진입 타이밍 신호 (실패해도 patternResult 자체는 보존)
+        try:
+            entry_sig = detector.entry_signal(daily_df, intraday_df=intraday_df)
+        except Exception as exc:
+            logger.warning("{} {} entry_signal 오류: {}", ticker, detector.name, exc)
+            entry_sig = EntrySignal(strength=0.0, signals={})
+
         result.pattern_results.append(pattern_result)
         result.confidence_scores.append(score)
+        result.entry_signals.append(entry_sig)
 
     # ── 거래량 필터 ───────────────────────────────────────────────
     try:
@@ -122,19 +135,21 @@ def scan_universe(
     daily_dfs: dict[str, pd.DataFrame],
     market_map: dict[str, str],
     fundamentals_map: dict[str, dict[str, float | None]] | None = None,
+    intraday_dfs: dict[str, pd.DataFrame] | None = None,
     max_workers: int = FETCH_MAX_WORKERS,
 ) -> list[TickerScanResult]:
     """전체 종목을 병렬 스캔한다.
 
     Args:
-        daily_dfs      : ticker → 일봉 DataFrame 매핑.
-        market_map     : ticker → "KR" | "US" 매핑.
-        fundamentals_map: ticker → fundamentals dict 매핑. None이면 재무 필터 생략.
-        max_workers    : ThreadPoolExecutor 워커 수.
+        daily_dfs       : ticker → 일봉 DataFrame 매핑.
+        market_map      : ticker → "KR" | "US" 매핑.
+        fundamentals_map: ticker → fundamentals dict. None 이면 재무 필터 생략.
+        intraday_dfs    : ticker → 60분봉 DataFrame. None 이면 진입 신호가 일봉
+                          으로 대리 평가됨.
+        max_workers     : ThreadPoolExecutor 워커 수.
 
     Returns:
-        탐지된 패턴이 1개 이상이거나 필터를 모두 통과한 종목의 결과 목록.
-        (빈 결과도 포함 — 상위 레이어에서 필터링)
+        종목별 TickerScanResult 목록 (빈 결과도 포함).
     """
     tickers = list(daily_dfs.keys())
     logger.info("scan_universe 시작: {}개 종목, workers={}", len(tickers), max_workers)
@@ -147,6 +162,7 @@ def scan_universe(
             market=market_map.get(ticker, "US"),
             daily_df=daily_dfs[ticker],
             fundamentals=fundamentals_map.get(ticker) if fundamentals_map else None,
+            intraday_df=intraday_dfs.get(ticker) if intraday_dfs else None,
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

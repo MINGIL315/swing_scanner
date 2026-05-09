@@ -43,7 +43,14 @@ def save_scan_results(
     orm_rows: list[ScanResultORM] = []
     for res in results:
         passed_both = res.passed_volume and res.passed_fundamental
-        for pattern_result, score in zip(res.pattern_results, res.confidence_scores):
+        # entry_signals 는 pattern_results 와 1:1 매핑. 호환: us 모듈/옛 코드는 속성 자체 없음.
+        entry_signals = getattr(res, "entry_signals", None) or []
+        if len(entry_signals) < len(res.pattern_results):
+            entry_signals = list(entry_signals) + [None] * (len(res.pattern_results) - len(entry_signals))
+
+        for pattern_result, score, entry_sig in zip(
+            res.pattern_results, res.confidence_scores, entry_signals
+        ):
             orm_rows.append(ScanResultORM(
                 scan_date=res.scan_date,
                 ticker=res.ticker,
@@ -53,8 +60,8 @@ def save_scan_results(
                 stop_loss=pattern_result.stop_loss,
                 target_price=pattern_result.target_price,
                 risk_reward_ratio=pattern_result.risk_reward_ratio,
-                entry_signal_strength=None,
-                entry_signals=None,
+                entry_signal_strength=entry_sig.strength if entry_sig else None,
+                entry_signals=entry_sig.signals if entry_sig else None,
                 pattern_details=pattern_result.details,
                 trend_weekly=res.weekly_direction,
                 passed_filters=passed_both,
