@@ -19,9 +19,16 @@ from scanner.config import (
     settings,
 )
 from scanner.db.universe_db import get_active_tickers
-from scanner.db.models import Fundamental, OHLCVDaily, ScanResult, Universe
+from scanner.db.models import (
+    Fundamental,
+    OHLCVDaily,
+    OHLCVIntraday,
+    ScanResult,
+    Universe,
+)
 from scanner.db.repository import get_scan_results, save_scan_results
 from scanner.db.session import get_session
+from scanner.kr.intraday import resample_to_60min
 from scanner.kr.scanner import scan_universe
 
 
@@ -93,12 +100,18 @@ def run_daily_pipeline(
         logger.info("재무 데이터 로드 중")
         fundamentals_map = _load_fundamentals(tickers)
 
+    # ── 4-2. 분봉 데이터 로드 (KR 만, 있으면 사용) ───────────────
+    intraday_dfs = _load_intraday_dfs(tickers, market_map)
+    if intraday_dfs:
+        logger.info("60분봉 로드 완료 ({}개 종목)", len(intraday_dfs))
+
     # ── 5. 스캔 실행 ─────────────────────────────────────────────
     logger.info("scan_universe 시작 ({}개 종목)", len(daily_dfs))
     results = scan_universe(
         daily_dfs=daily_dfs,
         market_map=market_map,
         fundamentals_map=fundamentals_map,
+        intraday_dfs=intraday_dfs or None,
         max_workers=FETCH_MAX_WORKERS,
     )
 
@@ -223,6 +236,58 @@ def _load_daily_dfs(tickers: list[str], lookback_days: int = 500) -> dict[str, p
         for ticker, data in grouped.items()
         if data
     }
+
+
+def _load_intraday_dfs(
+    tickers: list[str],
+    market_map: dict[str, str],
+    lookback_days: int = 30,
+) -> dict[str, pd.DataFrame]:
+    """KR 종목의 1분봉을 DB 에서 로드 → 60분봉으로 합성하여 매핑 반환.
+
+    분봉 데이터가 적재되지 않은 종목/시장은 매핑에 포함되지 않는다.
+    1분봉 → 60분봉 (drop_partial=True) 변환 후 ticker 별 dict 반환.
+
+    Args:
+        tickers      : 로드 대상 ticker 목록.
+        market_map   : ticker → market. KR 만 처리, US 는 스킵.
+        lookback_days: 오늘 기준 최대 소급 캘린더 일수 (영업일 ~22일).
+
+    Returns:
+        ticker → 60분봉 DataFrame. 분봉 미적재 종목은 키 없음.
+    """
+    from datetime import datetime, time as time_t
+    kr_tickers = [t for t in tickers if market_map.get(t) == "KR"]
+    if not kr_tickers:
+        return {}
+
+    cutoff = datetime.combine(date.today() - timedelta(days=lookback_days), time_t.min)
+    with get_session() as session:
+        rows = session.execute(
+            select(OHLCVIntraday)
+            .where(OHLCVIntraday.ticker.in_(kr_tickers))
+            .where(OHLCVIntraday.datetime >= cutoff)
+            .order_by(OHLCVIntraday.ticker, OHLCVIntraday.datetime)
+        ).scalars().all()
+
+    grouped: dict[str, list[dict]] = {}
+    for r in rows:
+        grouped.setdefault(r.ticker, []).append({
+            "ticker": r.ticker,
+            "datetime": r.datetime,
+            "open": r.open, "high": r.high, "low": r.low,
+            "close": r.close, "volume": r.volume,
+        })
+
+    result: dict[str, pd.DataFrame] = {}
+    for ticker, data in grouped.items():
+        if not data:
+            continue
+        df_1min = pd.DataFrame(data)
+        df_60 = resample_to_60min(df_1min, drop_partial=True)
+        if not df_60.empty:
+            result[ticker] = df_60
+    return result
 
 
 def _load_market_map(tickers: list[str]) -> dict[str, str]:
