@@ -192,7 +192,8 @@ let _priceLineParams = null;
 function setPriceLines(params) { _priceLineParams = params; }
 
 async function loadChart() {
-  const r = await fetch(`${API}/api/stocks/${ticker}/ohlcv?days=120`);
+  // 3년치(≈750영업일) 가 DB 에 적재됨 → 적재된 만큼 모두 차트에 표시 (1000 = 충분한 buffer)
+  const r = await fetch(`${API}/api/stocks/${ticker}/ohlcv?days=1000`);
   if (!r.ok) return;
   const d = await r.json();
 
