@@ -14,7 +14,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from scanner.config import MIN_AVG_TRADING_VALUE_KRW
 from scanner.db.models import Base
 from scanner.db.repository import get_scan_results, save_scan_results
 from scanner.us.scanner import TickerScanResult, analyze_ticker, scan_universe
@@ -65,11 +64,7 @@ def no_signal_df() -> pd.DataFrame:
 
 
 def _valid_fundamentals_kr() -> dict:
-    return {
-        "market_cap": MIN_AVG_TRADING_VALUE_KRW * 20,  # 1조원
-        "per": 12.0,
-        "debt_ratio": 80.0,
-    }
+    return {"market_cap": 1_000_000_000_000}  # 1조원
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +95,7 @@ class TestAnalyzeTicker:
 
     def test_volume_filter_runs(self, pullback_df: pd.DataFrame) -> None:
         res = analyze_ticker("TEST_PB", "KR", pullback_df)
-        assert "ok_value" in res.volume_details
+        assert "ok_volume_trend" in res.volume_details
 
     def test_fundamental_filter_runs_when_provided(self, pullback_df: pd.DataFrame) -> None:
         res = analyze_ticker("TEST_PB", "KR", pullback_df, _valid_fundamentals_kr())
